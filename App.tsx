@@ -183,7 +183,11 @@ html[data-native-platform="android"] .price-qty-grid,
 html[data-native-platform="android"] .price-qty-grid > *,
 html[data-native-platform="android"] .home-status-grid > *,
 html[data-native-platform="android"] .metric-grid > *,
-html[data-native-platform="android"] .report-filter-grid > *,
+html[data-native-platform="android"] .report-filters > *,
+html[data-native-platform="android"] .wic-top-grid > *,
+html[data-native-platform="android"] .wic-dates > *,
+html[data-native-platform="android"] .split-grid > *,
+html[data-native-platform="android"] .section-head > *,
 html[data-native-platform="android"] .two-col > * {
   min-width: 0;
   max-width: 100%;
@@ -280,8 +284,8 @@ html[data-native-platform="android"] .button-row > * {
 }
 @media (max-width: 380px) {
   html[data-native-platform="android"] .main {
-    padding-right: 12px;
-    padding-left: 12px;
+    padding-right: 12px !important;
+    padding-left: 12px !important;
   }
   html[data-native-platform="android"] .section-card {
     padding: 14px;
@@ -2222,6 +2226,10 @@ export default function App() {
         />
         {bannerMounted ? (
           <View
+            accessibilityElementsHidden={!bannerVisible}
+            importantForAccessibility={
+              bannerVisible ? "auto" : "no-hide-descendants"
+            }
             pointerEvents={bannerVisible ? "auto" : "none"}
             style={[
               styles.bannerRail,
