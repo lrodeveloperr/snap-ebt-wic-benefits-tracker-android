@@ -269,7 +269,10 @@ jobs:
           grep -F "package: name='com.goodusestudios.snapebtgrocerytracker.qa'" <<<"$badging"
           grep -F "targetSdkVersion:'36'" <<<"$badging"
           node scripts/verify-android.mjs "$final_apk"
-          sha256sum "$final_apk" | tee dist/SHA256SUMS.txt
+          (
+            cd dist
+            sha256sum "$(basename "$final_apk")" | tee SHA256SUMS.txt
+          )
           echo "path=$final_apk" >> "$GITHUB_OUTPUT"
 
       # Preserve a fully validated APK even if the hosted emulator itself is unavailable.
@@ -307,6 +310,7 @@ jobs:
           profile: pixel_6
           cores: 2
           ram-size: 2048M
+          disk-size: 2G
           emulator-boot-timeout: 420
           disable-linux-hw-accel: auto
           disable-animations: true
