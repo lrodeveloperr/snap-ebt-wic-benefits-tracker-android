@@ -1348,7 +1348,7 @@ export default function App() {
     if (!adsInitializationRef.current) {
       adsInitializationRef.current = (async () => {
         await mobileAds().setRequestConfiguration({
-          maxAdContentRating: MaxAdContentRating.PG,
+          maxAdContentRating: MaxAdContentRating.G,
         });
         if (removeAdsEntitlementRef.current !== "not-entitled") return false;
         await mobileAds().initialize();
