@@ -21,7 +21,7 @@ Hermes and React Native's New Architecture are enabled. Android backup is disabl
 Run **Actions > Android QA APK > Run workflow**. An authorized push to `main` also starts the job only when its commit message contains `[build-apk]`. The workflow in `.github/workflows/android-qa-apk.yml`:
 
 1. installs Node 22, JDK 17, and Android API/Build Tools 36;
-2. embeds the reviewed web app, prepares the reviewed Android assets, and runs source/type/test validation;
+2. embeds the reviewed web app, verifies the committed reviewed Android assets, and runs source/type/test validation;
 3. checks the Expo dependency set and resolved application ID;
 4. generates and verifies the Android project with Expo prebuild;
 5. builds and signs an installable release APK without EAS or EAS build credits;
@@ -49,8 +49,8 @@ export ANDROID_VERSION_CODE=1
 export EXPO_PUBLIC_ANDROID_ADMOB_APP_ID='ca-app-pub-3940256099942544~3347511713'
 export EXPO_PUBLIC_ANDROID_ADMOB_BANNER_ID='ca-app-pub-3940256099942544/6300978111'
 
-node scripts/embed-web-app.mjs
-node scripts/prepare-android-assets.mjs
+# Only needed when deliberately regenerating icon variants:
+npm run prepare:android-assets
 npm run validate:source
 npx expo config --type prebuild --json
 npx expo prebuild --clean --platform android --no-install

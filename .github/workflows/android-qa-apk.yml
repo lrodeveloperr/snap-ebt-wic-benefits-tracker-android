@@ -82,10 +82,8 @@ jobs:
           assert.equal(pkg.dependencies["react-native"], "0.86.2");
           NODE
 
-      - name: Prepare embedded app and Android assets
-        run: |
-          node scripts/embed-web-app.mjs
-          node scripts/prepare-android-assets.mjs
+      - name: Prepare embedded app
+        run: node scripts/embed-web-app.mjs
 
       - name: Validate source, types, and tests
         run: npm run validate:source

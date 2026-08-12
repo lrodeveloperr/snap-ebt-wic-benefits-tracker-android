@@ -54,7 +54,7 @@ Uninstalling erases that QA installation's on-device data.
 ## What the workflow proves
 
 - Expo resolves the QA application ID, GitHub run-number version code, and target SDK 36.
-- The canonical app is embedded and approved Android assets are prepared before validation.
+- The canonical app is embedded and committed approved Android assets are hash/format verified before prebuild.
 - Source validation, typechecking, tests, and locked native dependency checks pass.
 - Android prebuild completes for React Native 0.86.2.
 - The generated native Android project passes `scripts/verify-android.mjs`.

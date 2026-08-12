@@ -13,7 +13,7 @@
     "generate:notices": "node scripts/generate-notices.mjs",
     "verify:source": "node scripts/verify-source.mjs",
     "verify:android": "node scripts/verify-android.mjs",
-    "validate:source": "npm run prepare:android-assets && npm run embed:web && npm run typecheck && npm run test:core && npm run verify:source",
+    "validate:source": "npm run embed:web && npm run typecheck && npm run test:core && npm run verify:source",
     "prebuild:android": "npm run validate:source && expo prebuild --platform android --clean",
     "validate": "npm run validate:source"
   },
