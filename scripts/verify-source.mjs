@@ -26,6 +26,7 @@ const [
   packageText,
   provenance,
   installedAdsPackageText,
+  qaWorkflow,
 ] =
   await Promise.all([
     read("app.html"),
@@ -36,6 +37,7 @@ const [
     read("package.json"),
     read("SOURCE_PROVENANCE.md"),
     read("node_modules/react-native-google-mobile-ads/package.json"),
+    read(".github/workflows/android-qa-apk.yml"),
   ]);
 const appJson = JSON.parse(appJsonText);
 const packageJson = JSON.parse(packageText);
@@ -127,6 +129,12 @@ assert.equal(packageJson.dependencies["react-native-google-mobile-ads"], "16.3.4
 assert.equal(installedAdsPackage.version, "16.3.4");
 assert.equal(installedAdsPackage.sdkVersions.android.googleMobileAds, "25.0.0");
 assert.equal(installedAdsPackage.sdkVersions.android.googleUmp, "4.0.0");
+mustContain(qaWorkflow, '"$zipalign" -P 16 -f -v 4', "16 KiB APK alignment");
+mustContain(qaWorkflow, "-sigalg SHA256withRSA", "modern QA certificate signature");
+mustContain(qaWorkflow, "--v1-signing-enabled true", "APK v1 signature");
+mustContain(qaWorkflow, "--v2-signing-enabled true", "APK v2 signature");
+mustContain(qaWorkflow, "--v3-signing-enabled true", "APK v3 signature");
+mustContain(qaWorkflow, "adb install --no-streaming", "Android 15 install smoke test");
 
 for (const path of ["assets/icon.png", "assets/brand-logo-ui.png", "assets/splash-icon.png"]) {
   const bytes = await readFile(path);

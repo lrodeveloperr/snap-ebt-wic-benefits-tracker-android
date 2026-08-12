@@ -146,6 +146,22 @@ jobs:
       - name: Verify generated Android project
         run: node scripts/verify-android.mjs
 
+      - name: Make generated release artifact unsigned
+        shell: bash
+        run: |
+          node - <<'NODE'
+          const fs = require("node:fs");
+          const file = "android/app/build.gradle";
+          let source = fs.readFileSync(file, "utf8");
+          const line = "            signingConfig = signingConfigs.debug\n";
+          const occurrences = source.split(line).length - 1;
+          if (occurrences !== 1) {
+            throw new Error(`Expected one generated release debug signing line; found ${occurrences}.`);
+          }
+          source = source.replace(line, "");
+          fs.writeFileSync(file, source);
+          NODE
+
       - name: Configure Gradle cache
         uses: gradle/actions/setup-gradle@v4
 
@@ -177,9 +193,9 @@ jobs:
         run: |
           set -euo pipefail
           shopt -s nullglob
-          release_apks=(android/app/build/outputs/apk/release/*.apk)
-          if (( ${#release_apks[@]} == 0 )); then
-            echo "No release APK was produced." >&2
+          release_apks=(android/app/build/outputs/apk/release/*-unsigned.apk)
+          if (( ${#release_apks[@]} != 1 )); then
+            echo "Expected one unsigned release APK; found ${#release_apks[@]}." >&2
             exit 1
           fi
           source_apk="${release_apks[0]}"
@@ -189,39 +205,102 @@ jobs:
           apksigner="$ANDROID_HOME/build-tools/36.0.0/apksigner"
           aapt="$ANDROID_HOME/build-tools/36.0.0/aapt"
           zipalign="$ANDROID_HOME/build-tools/36.0.0/zipalign"
+          aligned_apk="$RUNNER_TEMP/snap-ebt-wic-benefits-tracker-qa-aligned.apk"
+          qa_keystore="$RUNNER_TEMP/snap-ebt-wic-benefits-tracker-qa.p12"
 
-          if "$apksigner" verify "$source_apk" >/dev/null 2>&1; then
-            cp "$source_apk" "$final_apk"
-          else
-            aligned_apk="$RUNNER_TEMP/snap-ebt-wic-benefits-tracker-qa-aligned.apk"
-            qa_keystore="$RUNNER_TEMP/snap-ebt-wic-benefits-tracker-qa.p12"
-            "$zipalign" -f -p 4 "$source_apk" "$aligned_apk"
-            keytool -genkeypair -noprompt \
-              -storetype PKCS12 \
-              -keystore "$qa_keystore" \
-              -storepass android \
-              -keypass android \
-              -alias qa \
-              -keyalg RSA \
-              -keysize 2048 \
-              -validity 30 \
-              -dname "CN=SNAP EBT QA,OU=QA,O=Good Use Studios,L=Test,ST=Test,C=US"
-            "$apksigner" sign \
-              --ks "$qa_keystore" \
-              --ks-key-alias qa \
-              --ks-pass pass:android \
-              --key-pass pass:android \
-              --out "$final_apk" \
-              "$aligned_apk"
-          fi
+          # Expo prebuild signs its template release with a shared debug key.
+          # Always realign and replace that signature for a portable QA handoff.
+          "$zipalign" -P 16 -f -v 4 "$source_apk" "$aligned_apk"
+          keytool -genkeypair -noprompt \
+            -storetype PKCS12 \
+            -keystore "$qa_keystore" \
+            -storepass android \
+            -keypass android \
+            -alias qa \
+            -keyalg RSA \
+            -keysize 2048 \
+            -sigalg SHA256withRSA \
+            -validity 3650 \
+            -dname "CN=SNAP EBT QA,OU=QA,O=Good Use Studios,L=Test,ST=Test,C=US"
+          "$apksigner" sign \
+            --min-sdk-version 24 \
+            --v1-signing-enabled true \
+            --v2-signing-enabled true \
+            --v3-signing-enabled true \
+            --v4-signing-enabled false \
+            --ks "$qa_keystore" \
+            --ks-key-alias qa \
+            --ks-pass pass:android \
+            --key-pass pass:android \
+            --out "$final_apk" \
+            "$aligned_apk"
 
-          "$apksigner" verify --verbose --print-certs "$final_apk"
+          "$zipalign" -c -P 16 -v 4 "$final_apk"
+          signature_report="$($apksigner verify --verbose --print-certs --min-sdk-version 24 "$final_apk")"
+          printf '%s\n' "$signature_report"
+          grep -F "Verified using v1 scheme (JAR signing): true" <<<"$signature_report"
+          grep -F "Verified using v2 scheme (APK Signature Scheme v2): true" <<<"$signature_report"
+          grep -F "Verified using v3 scheme (APK Signature Scheme v3): true" <<<"$signature_report"
+          grep -F "Signer #1 certificate signature algorithm: SHA256withRSA" <<<"$signature_report"
           badging="$($aapt dump badging "$final_apk")"
           grep -F "package: name='com.goodusestudios.snapebtgrocerytracker.qa'" <<<"$badging"
           grep -F "targetSdkVersion:'36'" <<<"$badging"
           node scripts/verify-android.mjs "$final_apk"
           sha256sum "$final_apk" | tee dist/SHA256SUMS.txt
           echo "path=$final_apk" >> "$GITHUB_OUTPUT"
+
+      - name: Prove APK installs on Android 15
+        timeout-minutes: 12
+        shell: bash
+        run: |
+          set -euo pipefail
+          system_image="system-images;android-35;google_apis;x86_64"
+          sdkmanager "emulator" "$system_image"
+          echo no | avdmanager create avd \
+            --force \
+            --name snap-qa-api-35 \
+            --package "$system_image" \
+            --device pixel_6
+
+          acceleration=(-accel off)
+          if [[ -e /dev/kvm ]]; then
+            sudo chmod 666 /dev/kvm
+            acceleration=(-accel on)
+          fi
+          emulator_log="$RUNNER_TEMP/android-emulator.log"
+          "$ANDROID_HOME/emulator/emulator" \
+            -avd snap-qa-api-35 \
+            -no-window \
+            -no-audio \
+            -no-boot-anim \
+            -no-snapshot \
+            -gpu swiftshader_indirect \
+            "${acceleration[@]}" >"$emulator_log" 2>&1 &
+          emulator_pid=$!
+          trap 'adb emu kill >/dev/null 2>&1 || true; kill "$emulator_pid" >/dev/null 2>&1 || true' EXIT
+
+          timeout 240 adb wait-for-device
+          booted=false
+          for _ in {1..120}; do
+            if [[ "$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" == "1" ]]; then
+              booted=true
+              break
+            fi
+            sleep 2
+          done
+          if [[ "$booted" != true ]]; then
+            cat "$emulator_log"
+            exit 1
+          fi
+
+          adb install --no-streaming -r dist/snap-ebt-wic-benefits-tracker-qa.apk
+          installed_path="$(adb shell pm path com.goodusestudios.snapebtgrocerytracker.qa | tr -d '\r')"
+          [[ "$installed_path" == package:* ]] || {
+            echo "QA package was not installed: $installed_path" >&2
+            exit 1
+          }
+          adb shell dumpsys package com.goodusestudios.snapebtgrocerytracker.qa \
+            | grep -F "versionCode=${ANDROID_VERSION_CODE}"
 
       - name: Upload QA APK
         uses: actions/upload-artifact@v4

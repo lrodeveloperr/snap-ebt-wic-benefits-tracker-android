@@ -61,8 +61,9 @@ Uninstalling erases that QA installation's on-device data.
 - Android prebuild completes for React Native 0.86.2.
 - The generated native Android project passes `scripts/verify-android.mjs`.
 - Gradle produces a release APK.
-- The staged APK has a valid signature.
+- The staged APK is 16 KiB aligned and has valid v1, v2, and v3 signatures from a fresh SHA-256 QA certificate.
 - Android's package metadata reports the `.qa` package and target SDK 36.
+- A clean Android 15 emulator accepts and installs the exact staged APK before it is uploaded.
 
 It does not prove live Google Play Billing, production ads, Play App Signing, store policy declarations, or upgrade compatibility with the production app.
 
@@ -74,7 +75,7 @@ Demo ads are appropriate for layout and lifecycle testing. Validate consent-regi
 
 ## Signing assumptions
 
-`assembleRelease` may emit either a template-development-signed or unsigned APK. The workflow verifies the result. If it is unsigned, the workflow creates a short-lived QA keystore in the runner's temporary directory, zip-aligns the APK, and signs it. No keystore is uploaded with the artifact. The resulting signature is intentionally non-production and disposable, so installing a later run may require uninstalling the earlier QA build first.
+`assembleRelease` emits an Expo template-development-signed APK. The workflow never distributes that signature: it realigns the APK for 16 KiB and 4 KiB devices, creates a modern short-lived QA keystore in the runner's temporary directory, and signs the staged APK with v1, v2, and v3 schemes. No keystore is uploaded with the artifact. The resulting signature is intentionally non-production and disposable, so installing a later run may require uninstalling the earlier QA build first.
 
 Production must use a separately protected upload key and the base application ID `com.goodusestudios.snapebtgrocerytracker`. Do not promote, rename, or upload the QA APK to Google Play.
 

@@ -26,9 +26,10 @@ Run **Actions > Android QA APK > Run workflow**. An authorized push to `main` al
 2. embeds the reviewed web app, verifies the committed reviewed Android assets, and runs source/type/test validation;
 3. checks the Expo dependency set and resolved application ID;
 4. generates and verifies the Android project with Expo prebuild;
-5. builds and signs an installable release APK without EAS or EAS build credits;
-6. verifies the signature, package name, target SDK, and SHA-256 checksum; and
-7. uploads `snap-ebt-wic-benefits-tracker-qa-<run-number>` for 14 days.
+5. realigns and signs the release APK with a fresh SHA-256 QA certificate and APK signature schemes v1, v2, and v3;
+6. verifies the signature, 16 KiB alignment, package name, target SDK, and SHA-256 checksum;
+7. installs the final APK on a clean Android 15 emulator; and
+8. uploads `snap-ebt-wic-benefits-tracker-qa-<run-number>` for 14 days.
 
 Download the artifact, unzip it, and install it on a test device:
 
