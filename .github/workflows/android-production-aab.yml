@@ -264,7 +264,7 @@ jobs:
           bundletool_version="1.18.3"
           bundletool="$RUNNER_TEMP/bundletool.jar"
           bundletool_sha256="a099cfa1543f55593bc2ed16a70a7c67fe54b1747bb7301f37fdfd6d91028e29"
-          curl -fL \
+          curl -fL --retry 5 --retry-all-errors --retry-delay 2 \
             "https://github.com/google/bundletool/releases/download/${bundletool_version}/bundletool-all-${bundletool_version}.jar" \
             -o "$bundletool"
           printf '%s  %s\n' "$bundletool_sha256" "$bundletool" | sha256sum -c -
