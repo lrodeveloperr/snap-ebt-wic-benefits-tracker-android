@@ -158,7 +158,7 @@ mustContain(
   "pinned Android emulator runner",
 );
 mustContain(qaWorkflow, "target: aosp_atd", "lean Android 15 test image");
-mustContain(qaWorkflow, "disk-size: 2G", "bounded Android emulator data partition");
+mustContain(qaWorkflow, "-partition-size 1536", "command-line Android emulator data partition");
 mustContain(qaWorkflow, "emulator-boot-timeout: 420", "bounded Android emulator boot");
 mustContain(qaWorkflow, "script: bash scripts/prove-android-install.sh", "single-command install proof");
 mustContain(installProof, "set -euo pipefail", "strict Android install proof");

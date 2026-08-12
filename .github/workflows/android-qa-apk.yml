@@ -310,9 +310,8 @@ jobs:
           profile: pixel_6
           cores: 2
           ram-size: 2048M
-          disk-size: 2G
           emulator-boot-timeout: 420
           disable-linux-hw-accel: auto
           disable-animations: true
-          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none -no-metrics
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none -no-metrics -partition-size 1536
           script: bash scripts/prove-android-install.sh
