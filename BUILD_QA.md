@@ -25,6 +25,8 @@ The workflow uses its run number as `versionCode`, validates the APK with Androi
 
 These are Google's demo ad identifiers. They are pinned in the workflow even if a repository environment contains live values, preventing a manual QA build from requesting production ads.
 
+The ads wrapper is locked to the upstream-published 16.3.4 release, which resolves Google Mobile Ads 25.0.0 and UMP 4.0.0. This avoids the Kotlin 2.3 metadata in the newer 25.4.0 dependency while the Expo 57 Android toolchain compiles Kotlin 2.1. The workflow asserts the exact resolved versions before generating Android source.
+
 ## Run and install
 
 1. Open the repository's **Actions** tab.

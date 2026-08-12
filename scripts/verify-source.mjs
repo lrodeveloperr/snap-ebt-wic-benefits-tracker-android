@@ -17,7 +17,16 @@ const mustContain = (source, value, label = value) =>
 const mustNotContain = (source, value, label = value) =>
   assert.ok(!source.includes(value), `forbidden ${label}`);
 
-const [html, app, billing, appConfig, appJsonText, packageText, provenance] =
+const [
+  html,
+  app,
+  billing,
+  appConfig,
+  appJsonText,
+  packageText,
+  provenance,
+  installedAdsPackageText,
+] =
   await Promise.all([
     read("app.html"),
     read("App.tsx"),
@@ -26,9 +35,11 @@ const [html, app, billing, appConfig, appJsonText, packageText, provenance] =
     read("app.json"),
     read("package.json"),
     read("SOURCE_PROVENANCE.md"),
+    read("node_modules/react-native-google-mobile-ads/package.json"),
   ]);
 const appJson = JSON.parse(appJsonText);
 const packageJson = JSON.parse(packageText);
+const installedAdsPackage = JSON.parse(installedAdsPackageText);
 
 assert.match(html.trimStart(), /^<!doctype html>/i);
 assert.match(html, /<\/html>\s*$/i);
@@ -112,6 +123,10 @@ assert.equal(appJson.expo.android.allowBackup, false);
 assert.ok(appJson.expo.android.permissions.includes("android.permission.POST_NOTIFICATIONS"));
 assert.ok(appJson.expo.android.blockedPermissions.includes("android.permission.VIBRATE"));
 assert.equal(packageJson.name, "snap-ebt-wic-benefits-tracker-android");
+assert.equal(packageJson.dependencies["react-native-google-mobile-ads"], "16.3.4");
+assert.equal(installedAdsPackage.version, "16.3.4");
+assert.equal(installedAdsPackage.sdkVersions.android.googleMobileAds, "25.0.0");
+assert.equal(installedAdsPackage.sdkVersions.android.googleUmp, "4.0.0");
 
 for (const path of ["assets/icon.png", "assets/brand-logo-ui.png", "assets/splash-icon.png"]) {
   const bytes = await readFile(path);

@@ -67,7 +67,7 @@ jobs:
             expo: "57.0.9",
             "react-native": "0.86.2",
             "react-native-webview": "14.0.1",
-            "react-native-google-mobile-ads": "16.4.0",
+            "react-native-google-mobile-ads": "16.3.4",
             "expo-notifications": "57.0.10",
             "expo-iap": "5.2.4",
           };
@@ -80,6 +80,9 @@ jobs:
           }
           assert.equal(pkg.dependencies.expo, "~57.0.9");
           assert.equal(pkg.dependencies["react-native"], "0.86.2");
+          const adsPackage = require("./node_modules/react-native-google-mobile-ads/package.json");
+          assert.equal(adsPackage.sdkVersions.android.googleMobileAds, "25.0.0");
+          assert.equal(adsPackage.sdkVersions.android.googleUmp, "4.0.0");
           NODE
 
       - name: Prepare embedded app
@@ -145,6 +148,24 @@ jobs:
 
       - name: Configure Gradle cache
         uses: gradle/actions/setup-gradle@v4
+
+      - name: Verify resolved Google ads SDKs
+        working-directory: android
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./gradlew :react-native-google-mobile-ads:dependencies \
+            --configuration releaseCompileClasspath \
+            --no-daemon | tee "$RUNNER_TEMP/google-ads-dependencies.txt"
+          grep -F "com.google.android.gms:play-services-ads:25.0.0" \
+            "$RUNNER_TEMP/google-ads-dependencies.txt"
+          grep -F "com.google.android.ump:user-messaging-platform:4.0.0" \
+            "$RUNNER_TEMP/google-ads-dependencies.txt"
+          if grep -F "com.google.android.gms:play-services-ads:25.4.0" \
+            "$RUNNER_TEMP/google-ads-dependencies.txt"; then
+            echo "Incompatible Google Mobile Ads 25.4.0 was resolved." >&2
+            exit 1
+          fi
 
       - name: Build standalone release APK
         working-directory: android

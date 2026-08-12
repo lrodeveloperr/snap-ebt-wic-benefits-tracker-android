@@ -16,6 +16,8 @@ The app keeps grocery planning data on the device, supports SNAP/EBT and Puerto 
 
 Hermes and React Native's New Architecture are enabled. Android backup is disabled and unneeded sensitive permissions are blocked in `app.json`.
 
+The ads wrapper is locked to `react-native-google-mobile-ads` 16.3.4, whose published Android dependency pair is Google Mobile Ads 25.0.0 and UMP 4.0.0. This avoids the Kotlin 2.3 metadata introduced by the wrapper's 25.4.0 dependency while retaining a normal, upstream-published package. Source and CI validation fail if the wrapper or native SDK pair drifts.
+
 ## Fastest QA build: GitHub Actions
 
 Run **Actions > Android QA APK > Run workflow**. An authorized push to `main` also starts the job only when its commit message contains `[build-apk]`. The workflow in `.github/workflows/android-qa-apk.yml`:
