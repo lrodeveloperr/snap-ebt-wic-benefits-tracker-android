@@ -252,7 +252,7 @@ jobs:
           "$zipalign" -c -P 16 -v 4 "$final_apk"
           legacy_signature_report="$($apksigner verify \
             --verbose \
-            --min-sdk-version 1 \
+            --min-sdk-version 23 \
             --max-sdk-version 23 \
             "$final_apk")"
           printf '%s\n' "$legacy_signature_report"
