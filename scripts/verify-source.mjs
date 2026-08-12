@@ -27,6 +27,7 @@ const [
   provenance,
   installedAdsPackageText,
   qaWorkflow,
+  installProof,
 ] =
   await Promise.all([
     read("app.html"),
@@ -38,6 +39,7 @@ const [
     read("SOURCE_PROVENANCE.md"),
     read("node_modules/react-native-google-mobile-ads/package.json"),
     read(".github/workflows/android-qa-apk.yml"),
+    read("scripts/prove-android-install.sh"),
   ]);
 const appJson = JSON.parse(appJsonText);
 const packageJson = JSON.parse(packageText);
@@ -150,7 +152,6 @@ mustContain(qaWorkflow, "--v2-signing-enabled true", "APK v2 signature");
 mustContain(qaWorkflow, "--v3-signing-enabled true", "APK v3 signature");
 mustContain(qaWorkflow, "--min-sdk-version 23", "APK v1 verification floor");
 mustContain(qaWorkflow, "--max-sdk-version 23", "APK v1 compatibility verification");
-mustContain(qaWorkflow, "adb install --no-streaming", "Android 15 install smoke test");
 mustContain(
   qaWorkflow,
   "reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d",
@@ -158,6 +159,10 @@ mustContain(
 );
 mustContain(qaWorkflow, "target: aosp_atd", "lean Android 15 test image");
 mustContain(qaWorkflow, "emulator-boot-timeout: 420", "bounded Android emulator boot");
+mustContain(qaWorkflow, "script: bash scripts/prove-android-install.sh", "single-command install proof");
+mustContain(installProof, "set -euo pipefail", "strict Android install proof");
+mustContain(installProof, "adb install --no-streaming -r", "APK PackageManager install proof");
+mustContain(installProof, 'grep -F "versionCode=${ANDROID_VERSION_CODE}"', "installed version proof");
 assert.ok(
   qaWorkflow.indexOf("- name: Upload QA APK") <
     qaWorkflow.indexOf("- name: Prove APK installs on Android 15"),

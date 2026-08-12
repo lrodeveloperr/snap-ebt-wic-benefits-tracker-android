@@ -311,15 +311,4 @@ jobs:
           disable-linux-hw-accel: auto
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none -no-metrics
-          script: |
-            bash -euo pipefail <<'BASH'
-            adb devices -l
-            adb install --no-streaming -r dist/snap-ebt-wic-benefits-tracker-qa.apk
-            installed_path="$(adb shell pm path com.goodusestudios.snapebtgrocerytracker.qa | tr -d '\r')"
-            [[ "$installed_path" == package:* ]] || {
-              echo "QA package was not installed: $installed_path" >&2
-              exit 1
-            }
-            adb shell dumpsys package com.goodusestudios.snapebtgrocerytracker.qa \
-              | grep -F "versionCode=${ANDROID_VERSION_CODE}"
-            BASH
+          script: bash scripts/prove-android-install.sh
