@@ -102,6 +102,7 @@ mustContain(app, 'data-native-platform="android"', "Android document marker");
 mustContain(app, "-webkit-text-size-adjust: 100%", "stable Android WebView text scale");
 mustContain(app, "grid-template-columns: minmax(0, 1fr)", "shrinkable Android grids");
 mustContain(app, '.report-filters > *', "shrinkable Android report filters");
+mustContain(app, '.report-filter-grid > *', "shrinkable Android report filter grid");
 mustContain(app, "padding-right: 12px !important", "effective narrow Android gutter");
 mustContain(app, "textZoom={100}", "explicit Android WebView text zoom");
 mustContain(app, "runtime.setRuntimeBannerHeight(0)", "native-flow ad layout");
