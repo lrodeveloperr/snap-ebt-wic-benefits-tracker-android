@@ -48,8 +48,9 @@ import type {
 } from "./src/removeAdsPurchase";
 
 const LOCAL_APP_ORIGIN = "https://snap-ebt-wic.local/";
-const AD_SLOT_HEIGHT = 50;
-const AD_SLOT_BOTTOM = 66;
+const AD_BANNER_HEIGHT = 50;
+const AD_RAIL_SEPARATOR_HEIGHT = 10;
+const AD_RAIL_HEIGHT = AD_BANNER_HEIGHT + AD_RAIL_SEPARATOR_HEIGHT;
 const GOOGLE_DEMO_PUBLISHER_ID = "3940256099942544";
 const ANDROID_ADMOB_TEST_BANNER_ID =
   "ca-app-pub-3940256099942544/6300978111";
@@ -78,10 +79,240 @@ const ANDROID_COPY_REPLACEMENTS = [
   ["App Store", "Google Play"],
 ] as const;
 
-const ANDROID_APP_HTML = ANDROID_COPY_REPLACEMENTS.reduce(
-  (html, [source, replacement]) => html.split(source).join(replacement),
-  APP_HTML,
-);
+const ANDROID_NATIVE_LAYOUT_STYLE = String.raw`
+<style id="android-native-layout">
+html[data-native-platform="android"] {
+  --radius: 16px;
+  --bottom: 56px;
+  --ad-nav-height: 56px;
+  width: 100%;
+  max-width: 100%;
+  overflow-x: hidden;
+  overflow-x: clip;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+html[data-native-platform="android"] body,
+html[data-native-platform="android"] .app-shell {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: hidden;
+  overflow-x: clip;
+  font-family: Roboto, "Noto Sans", system-ui, sans-serif;
+}
+html[data-native-platform="android"] .topbar {
+  height: 56px;
+  padding: 0 12px;
+  grid-template-columns: 44px minmax(0, 1fr) auto;
+  background: #fff;
+  border-bottom: 1px solid #dfe3e8;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+html[data-native-platform="android"] .topbar-title {
+  padding-left: 8px;
+  color: #202124;
+  font-size: 20px;
+  font-weight: 650;
+  letter-spacing: 0;
+}
+html[data-native-platform="android"] .icon-btn {
+  width: 40px;
+  height: 40px;
+  border-radius: 20px;
+}
+html[data-native-platform="android"] .main {
+  width: 100%;
+  max-width: 720px;
+  min-width: 0;
+  padding: 72px 16px 76px !important;
+  margin: 0 auto;
+}
+html[data-native-platform="android"] .bottom-nav {
+  height: 56px;
+  padding: 4px 8px;
+  background: #fff;
+  border-top: 1px solid #dfe3e8;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+html[data-native-platform="android"] .nav-btn {
+  min-width: 0;
+  min-height: 48px;
+  padding: 3px;
+  gap: 2px;
+  border-radius: 16px;
+}
+html[data-native-platform="android"] .nav-btn.active {
+  color: #0b73d9;
+  background: #e8f1ff !important;
+}
+html[data-native-platform="android"] .nav-btn span:last-child {
+  font-size: 11px;
+  font-weight: 650;
+}
+html[data-native-platform="android"] .drawer {
+  padding: 18px 14px 20px;
+  border-radius: 0 20px 20px 0;
+}
+html[data-native-platform="android"] .modal {
+  padding: 24px 16px 22px;
+}
+html[data-native-platform="android"] .onboarding {
+  padding: 28px 16px 24px;
+}
+html[data-native-platform="android"] #storageAlert {
+  top: 8px !important;
+}
+html[data-native-platform="android"] .ad-banner,
+html[data-native-platform="android"] .ad-nav-separator {
+  display: none !important;
+}
+html[data-native-platform="android"] .toast {
+  bottom: 80px;
+}
+html[data-native-platform="android"] .page,
+html[data-native-platform="android"] .page > *,
+html[data-native-platform="android"] .section-card,
+html[data-native-platform="android"] .section-card > *,
+html[data-native-platform="android"] form,
+html[data-native-platform="android"] fieldset,
+html[data-native-platform="android"] .field,
+html[data-native-platform="android"] .filter-row,
+html[data-native-platform="android"] .price-qty-grid,
+html[data-native-platform="android"] .price-qty-grid > *,
+html[data-native-platform="android"] .home-status-grid > *,
+html[data-native-platform="android"] .metric-grid > *,
+html[data-native-platform="android"] .report-filter-grid > *,
+html[data-native-platform="android"] .two-col > * {
+  min-width: 0;
+  max-width: 100%;
+}
+html[data-native-platform="android"] .page {
+  gap: 14px;
+}
+html[data-native-platform="android"] .page-head h1 {
+  color: #202124;
+  font-size: 28px;
+  font-weight: 650;
+  letter-spacing: -.4px;
+}
+html[data-native-platform="android"] .section-card,
+html[data-native-platform="android"] .summary-card,
+html[data-native-platform="android"] .saved-card,
+html[data-native-platform="android"] .history-card {
+  border-radius: 16px;
+}
+html[data-native-platform="android"] label,
+html[data-native-platform="android"] .label,
+html[data-native-platform="android"] legend {
+  color: #5f6368;
+  font-size: 14px;
+  font-weight: 650;
+}
+html[data-native-platform="android"] input:not([type="checkbox"]):not([type="radio"]),
+html[data-native-platform="android"] select,
+html[data-native-platform="android"] .input-like {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  height: 48px;
+  min-height: 48px;
+  padding: 0 14px;
+  border: 1px solid #cbd5df;
+  border-radius: 12px;
+  background: #fff;
+  color: #202124;
+  font-size: 16px;
+  box-shadow: none;
+}
+html[data-native-platform="android"] fieldset {
+  width: 100%;
+  min-inline-size: 0;
+  margin-inline: 0;
+  padding: 12px;
+  border: 1px solid #d6dce3;
+  border-radius: 14px;
+}
+html[data-native-platform="android"] legend {
+  padding: 0 5px;
+}
+html[data-native-platform="android"] .price-qty-grid {
+  grid-template-columns: minmax(0, 1fr) minmax(112px, 38%);
+  gap: 12px;
+}
+html[data-native-platform="android"] .stepper {
+  min-width: 0;
+  grid-template-columns: 40px minmax(0, 1fr) 40px;
+  border-radius: 12px;
+}
+html[data-native-platform="android"] .stepper input {
+  width: 100%;
+  min-width: 0;
+  padding: 0 2px !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  text-align: center;
+  box-shadow: none !important;
+}
+html[data-native-platform="android"] .chips,
+html[data-native-platform="android"] .funding-chips {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+}
+html[data-native-platform="android"] .filter-row > .chips,
+html[data-native-platform="android"] fieldset > .funding-chips {
+  flex-wrap: wrap;
+  overflow: visible;
+}
+html[data-native-platform="android"] .fund-chip,
+html[data-native-platform="android"] .chips button {
+  min-height: 44px;
+  padding: 9px 13px;
+  border-radius: 14px;
+}
+html[data-native-platform="android"] .btn {
+  border-radius: 12px;
+}
+html[data-native-platform="android"] .button-row > * {
+  min-width: 0;
+}
+@media (max-width: 380px) {
+  html[data-native-platform="android"] .main {
+    padding-right: 12px;
+    padding-left: 12px;
+  }
+  html[data-native-platform="android"] .section-card {
+    padding: 14px;
+  }
+  html[data-native-platform="android"] .price-qty-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+</style>`;
+
+function buildAndroidAppHtml(html: string) {
+  let androidHtml = ANDROID_COPY_REPLACEMENTS.reduce(
+    (next, [source, replacement]) => next.split(source).join(replacement),
+    html,
+  );
+  const htmlTag = /<html\b([^>]*)>/i;
+  if (!htmlTag.test(androidHtml) || !androidHtml.includes("</head>")) {
+    throw new Error("Embedded app HTML is missing its document shell");
+  }
+  androidHtml = androidHtml.replace(
+    htmlTag,
+    (_tag, attributes: string) =>
+      `<html${attributes} data-native-platform="android">`,
+  );
+  return androidHtml.replace(
+    "</head>",
+    `${ANDROID_NATIVE_LAYOUT_STYLE}</head>`,
+  );
+}
+
+const ANDROID_APP_HTML = buildAndroidAppHtml(APP_HTML);
 
 type ConsentState = "unresolved" | "permitted" | "blocked";
 type NativeAdState = "idle" | "loading" | "loaded" | "failed";
@@ -448,6 +679,19 @@ const NATIVE_BRIDGE_SCRIPT = String.raw`
   window.addEventListener("gbt-ad-presentation-change", publishAdPresentation);
   window.setInterval(publishAdPresentation, 250);
   publishAdPresentation();
+
+  document.addEventListener("click", function (event) {
+    const target = event.target;
+    const routeButton = target && typeof target.closest === "function"
+      ? target.closest("[data-route]")
+      : null;
+    if (!routeButton) return;
+    window.setTimeout(function () {
+      window.scrollTo(0, 0);
+      const main = document.getElementById("main");
+      if (main && typeof main.scrollTo === "function") main.scrollTo(0, 0);
+    }, 0);
+  }, true);
 
   post({ type: "bridge-ready" });
 })();
@@ -1323,18 +1567,13 @@ export default function App() {
           : nativeAdState === "failed"
             ? "AD_UNAVAILABLE"
             : "AD_LOADING";
-    const height =
-      removeAdsEntitlement === "not-entitled" &&
-      nativeAdState === "loaded"
-        ? AD_SLOT_HEIGHT
-        : 0;
     webViewRef.current?.injectJavaScript(`
       (function () {
         const runtime = window.GBTAdRuntime;
         if (!runtime) return;
         runtime.setMode("REAL");
         runtime.setConsentStatus(${JSON.stringify(consent)});
-        runtime.setRuntimeBannerHeight(${height});
+        runtime.setRuntimeBannerHeight(0);
         runtime.setState(${JSON.stringify(state)});
       })();
       true;
@@ -1939,7 +2178,7 @@ export default function App() {
     legalReady &&
     consentState === "permitted" &&
     adEligible &&
-    nativeAdState !== "failed";
+    (nativeAdState !== "failed" || adLoadAttempt < 2);
   const bannerMounted =
     showBanner && webAdState !== "AD_TEMPORARILY_HIDDEN";
   const bannerVisible =
@@ -1964,6 +2203,7 @@ export default function App() {
           mixedContentMode="never"
           setBuiltInZoomControls={false}
           setDisplayZoomControls={false}
+          textZoom={100}
           overScrollMode="never"
           allowsFullscreenVideo={false}
           mediaPlaybackRequiresUserAction
@@ -1984,7 +2224,7 @@ export default function App() {
           <View
             pointerEvents={bannerVisible ? "auto" : "none"}
             style={[
-              styles.bannerOverlay,
+              styles.bannerRail,
               !bannerVisible && styles.bannerHidden,
             ]}
           >
@@ -2022,14 +2262,15 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: "#f2f2f7",
   },
-  bannerOverlay: {
-    position: "absolute",
-    left: 0,
-    right: 0,
-    bottom: AD_SLOT_BOTTOM,
-    height: AD_SLOT_HEIGHT,
+  bannerRail: {
+    height: AD_RAIL_HEIGHT,
+    flexShrink: 0,
     alignItems: "center",
-    justifyContent: "center",
+    justifyContent: "flex-end",
+    backgroundColor: "#f2f2f7",
+    borderTopColor: "#d1d1d6",
+    borderTopWidth: StyleSheet.hairlineWidth,
+    paddingTop: AD_RAIL_SEPARATOR_HEIGHT,
     overflow: "hidden",
   },
   bannerHidden: {

@@ -230,6 +230,12 @@ jobs:
             -sigalg SHA256withRSA \
             -validity 3650 \
             -dname "CN=SNAP EBT QA,OU=QA,O=Good Use Studios,L=Test,ST=Test,C=US"
+          certificate_report="$(keytool -list -v \
+            -storetype PKCS12 \
+            -keystore "$qa_keystore" \
+            -storepass android \
+            -alias qa)"
+          grep -F "Signature algorithm name: SHA256withRSA" <<<"$certificate_report"
           "$apksigner" sign \
             --min-sdk-version 24 \
             --v1-signing-enabled true \
@@ -244,12 +250,21 @@ jobs:
             "$aligned_apk"
 
           "$zipalign" -c -P 16 -v 4 "$final_apk"
-          signature_report="$($apksigner verify --verbose --print-certs --min-sdk-version 24 "$final_apk")"
+          legacy_signature_report="$($apksigner verify \
+            --verbose \
+            --min-sdk-version 1 \
+            --max-sdk-version 23 \
+            "$final_apk")"
+          printf '%s\n' "$legacy_signature_report"
+          grep -F "Verified using v1 scheme (JAR signing): true" <<<"$legacy_signature_report"
+          signature_report="$($apksigner verify \
+            --verbose \
+            --print-certs \
+            --min-sdk-version 24 \
+            "$final_apk")"
           printf '%s\n' "$signature_report"
-          grep -F "Verified using v1 scheme (JAR signing): true" <<<"$signature_report"
           grep -F "Verified using v2 scheme (APK Signature Scheme v2): true" <<<"$signature_report"
           grep -F "Verified using v3 scheme (APK Signature Scheme v3): true" <<<"$signature_report"
-          grep -F "Signer #1 certificate signature algorithm: SHA256withRSA" <<<"$signature_report"
           badging="$($aapt dump badging "$final_apk")"
           grep -F "package: name='com.goodusestudios.snapebtgrocerytracker.qa'" <<<"$badging"
           grep -F "targetSdkVersion:'36'" <<<"$badging"
