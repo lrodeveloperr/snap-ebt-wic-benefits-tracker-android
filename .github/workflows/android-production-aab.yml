@@ -1,0 +1,305 @@
+name: Android Production AAB
+
+on:
+  workflow_dispatch:
+    inputs:
+      version_code:
+        description: Unused positive Google Play version code
+        required: true
+        default: "1"
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  build-production-aab:
+    name: Build signed production AAB
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    concurrency:
+      group: android-production-aab
+      cancel-in-progress: false
+    env:
+      LANG: C.UTF-8
+      CI: "1"
+      EXPO_NO_TELEMETRY: "1"
+      EXPO_PUBLIC_BUILD_PROFILE: production
+      EXPO_PUBLIC_AD_PROFILE: production
+      EXPO_PUBLIC_ANDROID_ADMOB_APP_ID: ca-app-pub-8054612600809568~2189058911
+      EXPO_PUBLIC_ANDROID_ADMOB_BANNER_ID: ca-app-pub-8054612600809568/5751919465
+      EXPO_PUBLIC_ADMOB_PUBLISHER_ID: "8054612600809568"
+      ANDROID_VERSION_CODE: ${{ inputs.version_code }}
+      PRODUCTION_PACKAGE: com.lateefrazaqoyetola.snapebtwictracker
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Use Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Use JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android API 36
+        shell: bash
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0"
+
+      - name: Validate requested version code
+        shell: bash
+        run: |
+          if [[ ! "$ANDROID_VERSION_CODE" =~ ^[1-9][0-9]*$ ]]; then
+            echo "version_code must be a positive integer." >&2
+            exit 1
+          fi
+
+      - name: Install JavaScript dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Verify locked native dependency versions
+        shell: bash
+        run: |
+          node - <<'NODE'
+          const assert = require("node:assert/strict");
+          const lock = require("./package-lock.json");
+          const expected = {
+            expo: "57.0.9",
+            "react-native": "0.86.2",
+            "react-native-webview": "14.0.1",
+            "react-native-google-mobile-ads": "16.3.4",
+            "expo-notifications": "57.0.10",
+            "expo-iap": "5.2.4",
+          };
+          for (const [name, version] of Object.entries(expected)) {
+            assert.equal(lock.packages?.[`node_modules/${name}`]?.version, version);
+          }
+          const ads = require("./node_modules/react-native-google-mobile-ads/package.json");
+          assert.equal(ads.sdkVersions.android.googleMobileAds, "25.0.0");
+          assert.equal(ads.sdkVersions.android.googleUmp, "4.0.0");
+          NODE
+
+      - name: Validate source, types, and tests
+        run: npm run validate:source
+
+      - name: Verify resolved production configuration
+        shell: bash
+        run: |
+          npx expo config --type prebuild --json > "$RUNNER_TEMP/expo-config.json"
+          node - <<'NODE'
+          const fs = require("node:fs");
+          const config = JSON.parse(
+            fs.readFileSync(process.env.RUNNER_TEMP + "/expo-config.json", "utf8"),
+          );
+          const build = config.plugins.find(
+            (plugin) => Array.isArray(plugin) && plugin[0] === "expo-build-properties",
+          )?.[1]?.android;
+          const ads = config.plugins.find(
+            (plugin) =>
+              Array.isArray(plugin) && plugin[0] === "react-native-google-mobile-ads",
+          )?.[1];
+          if (config.android.package !== process.env.PRODUCTION_PACKAGE) {
+            throw new Error(`Unexpected production package: ${config.android.package}`);
+          }
+          if (config.android.versionCode !== Number(process.env.ANDROID_VERSION_CODE)) {
+            throw new Error(`Unexpected versionCode: ${config.android.versionCode}`);
+          }
+          if (
+            config.name !== "SNAP-EBT & WIC Benefits Tracker" ||
+            config.extra?.buildProfile !== "production" ||
+            JSON.stringify(config.platforms) !== JSON.stringify(["android"])
+          ) {
+            throw new Error("Unexpected production application metadata.");
+          }
+          if (
+            build?.minSdkVersion !== 24 ||
+            build?.compileSdkVersion !== 36 ||
+            build?.targetSdkVersion !== 36 ||
+            build?.buildToolsVersion !== "36.0.0"
+          ) {
+            throw new Error("Unexpected resolved Android SDK configuration.");
+          }
+          if (ads?.androidAppId !== process.env.EXPO_PUBLIC_ANDROID_ADMOB_APP_ID) {
+            throw new Error("Resolved AdMob app ID is not the approved live Android app ID.");
+          }
+          NODE
+
+      - name: Generate production Android project
+        run: npx expo prebuild --clean --platform android --no-install
+
+      - name: Verify generated production project
+        run: node scripts/verify-android-production.mjs
+
+      - name: Make generated release bundle unsigned
+        shell: bash
+        run: |
+          node - <<'NODE'
+          const fs = require("node:fs");
+          const file = "android/app/build.gradle";
+          let source = fs.readFileSync(file, "utf8");
+          const releaseMarker = "        release {";
+          const releaseStart = source.indexOf(releaseMarker);
+          if (releaseStart < 0 || source.indexOf(releaseMarker, releaseStart + 1) >= 0) {
+            throw new Error("Expected exactly one generated release build block.");
+          }
+          const prefix = source.slice(0, releaseStart);
+          let releaseAndRemainder = source.slice(releaseStart);
+          const signingLine = /^\s*signingConfig\s*=\s*signingConfigs\.debug\s*$/gm;
+          const occurrences = [...releaseAndRemainder.matchAll(signingLine)].length;
+          if (occurrences !== 1) {
+            throw new Error(
+              `Expected one generated release debug signing line; found ${occurrences}.`,
+            );
+          }
+          releaseAndRemainder = releaseAndRemainder.replace(signingLine, "");
+          fs.writeFileSync(file, prefix + releaseAndRemainder);
+          NODE
+
+      - name: Configure Gradle cache
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Verify resolved Google ads SDKs
+        working-directory: android
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./gradlew :react-native-google-mobile-ads:dependencies \
+            --configuration releaseCompileClasspath \
+            --no-daemon | tee "$RUNNER_TEMP/google-ads-dependencies.txt"
+          grep -F "com.google.android.gms:play-services-ads:25.0.0" \
+            "$RUNNER_TEMP/google-ads-dependencies.txt"
+          grep -F "com.google.android.ump:user-messaging-platform:4.0.0" \
+            "$RUNNER_TEMP/google-ads-dependencies.txt"
+          if grep -F "com.google.android.gms:play-services-ads:25.4.0" \
+            "$RUNNER_TEMP/google-ads-dependencies.txt"; then
+            echo "Incompatible Google Mobile Ads 25.4.0 was resolved." >&2
+            exit 1
+          fi
+
+      - name: Build unsigned production bundle
+        working-directory: android
+        run: ./gradlew :app:bundleRelease --no-daemon --stacktrace
+
+      - name: Sign and validate production AAB
+        id: aab
+        shell: bash
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_UPLOAD_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_UPLOAD_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_UPLOAD_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_UPLOAD_KEY_PASSWORD }}
+          EXPECTED_CERT_SHA256: ${{ secrets.ANDROID_UPLOAD_CERT_SHA256 }}
+        run: |
+          set -euo pipefail
+          umask 077
+          : "${KEYSTORE_BASE64:?ANDROID_UPLOAD_KEYSTORE_BASE64 is missing}"
+          : "${KEYSTORE_PASSWORD:?ANDROID_UPLOAD_KEYSTORE_PASSWORD is missing}"
+          : "${KEY_ALIAS:?ANDROID_UPLOAD_KEY_ALIAS is missing}"
+          : "${KEY_PASSWORD:?ANDROID_UPLOAD_KEY_PASSWORD is missing}"
+          : "${EXPECTED_CERT_SHA256:?ANDROID_UPLOAD_CERT_SHA256 is missing}"
+
+          unsigned_aab="android/app/build/outputs/bundle/release/app-release.aab"
+          [[ -f "$unsigned_aab" ]] || { echo "Unsigned AAB is missing." >&2; exit 1; }
+          unsigned_report="$RUNNER_TEMP/unsigned-jarsigner.txt"
+          jarsigner -verify "$unsigned_aab" >"$unsigned_report" 2>&1 || true
+          grep -F "jar is unsigned" "$unsigned_report"
+
+          keystore="$RUNNER_TEMP/android-upload.p12"
+          certificate="$RUNNER_TEMP/android-upload-certificate.pem"
+          printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$keystore"
+          keytool -list \
+            -keystore "$keystore" -storetype PKCS12 \
+            -storepass:env KEYSTORE_PASSWORD -alias "$KEY_ALIAS" >/dev/null
+          keytool -exportcert -rfc \
+            -keystore "$keystore" -storetype PKCS12 \
+            -storepass:env KEYSTORE_PASSWORD -alias "$KEY_ALIAS" \
+            -file "$certificate" >/dev/null
+          source_cert_sha="$(
+            openssl x509 -in "$certificate" -noout -fingerprint -sha256 \
+              | cut -d= -f2 | tr -d ':[:space:]' | tr '[:lower:]' '[:upper:]'
+          )"
+          expected_cert_sha="$(
+            printf '%s' "$EXPECTED_CERT_SHA256" \
+              | tr -d ':[:space:]' | tr '[:lower:]' '[:upper:]'
+          )"
+          [[ "$source_cert_sha" == "$expected_cert_sha" ]] || {
+            echo "Upload-key certificate fingerprint does not match the protected value." >&2
+            exit 1
+          }
+
+          mkdir -p dist
+          final_aab="dist/SNAP-EBT-WIC-Benefits-Tracker-1.0.0-${ANDROID_VERSION_CODE}.aab"
+          jarsigner \
+            -keystore "$keystore" -storetype PKCS12 \
+            -storepass:env KEYSTORE_PASSWORD -keypass:env KEY_PASSWORD \
+            -sigalg SHA256withRSA -digestalg SHA-256 \
+            -signedjar "$final_aab" "$unsigned_aab" "$KEY_ALIAS"
+
+          jarsigner -verify -verbose:summary -certs "$final_aab" \
+            | tee "$RUNNER_TEMP/signed-jarsigner.txt"
+          grep -F "jar verified" "$RUNNER_TEMP/signed-jarsigner.txt"
+          signed_cert_sha="$(
+            keytool -printcert -jarfile "$final_aab" \
+              | sed -n 's/^[[:space:]]*SHA256: //p' \
+              | head -1 | tr -d ':[:space:]' | tr '[:lower:]' '[:upper:]'
+          )"
+          [[ "$signed_cert_sha" == "$source_cert_sha" ]] || {
+            echo "Signed AAB certificate does not match the upload key." >&2
+            exit 1
+          }
+
+          bundletool_version="1.18.3"
+          bundletool="$RUNNER_TEMP/bundletool.jar"
+          bundletool_sha256="a099cfa1543f55593bc2ed16a70a7c67fe54b1747bb7301f37fdfd6d91028e29"
+          curl -fL \
+            "https://github.com/google/bundletool/releases/download/${bundletool_version}/bundletool-all-${bundletool_version}.jar" \
+            -o "$bundletool"
+          printf '%s  %s\n' "$bundletool_sha256" "$bundletool" | sha256sum -c -
+
+          java -jar "$bundletool" validate --bundle="$final_aab"
+          java -jar "$bundletool" dump manifest \
+            --bundle="$final_aab" --module=base > "$RUNNER_TEMP/production-manifest.xml"
+          manifest="$RUNNER_TEMP/production-manifest.xml"
+          grep -F "package=\"${PRODUCTION_PACKAGE}\"" "$manifest"
+          grep -F "android:versionCode=\"${ANDROID_VERSION_CODE}\"" "$manifest"
+          grep -F 'android:minSdkVersion="24"' "$manifest"
+          grep -F 'android:targetSdkVersion="36"' "$manifest"
+          grep -F "$EXPO_PUBLIC_ANDROID_ADMOB_APP_ID" "$manifest"
+          if grep -F 'ca-app-pub-3940256099942544~3347511713' "$manifest"; then
+            echo "Google demo AdMob app ID reached the production manifest." >&2
+            exit 1
+          fi
+          bundle_source="$RUNNER_TEMP/index.android.bundle"
+          unzip -p "$final_aab" base/assets/index.android.bundle > "$bundle_source"
+          grep -aFq "$EXPO_PUBLIC_ANDROID_ADMOB_BANNER_ID" "$bundle_source"
+          node scripts/verify-android-production.mjs "$final_aab"
+
+          cp "$certificate" dist/android-upload-certificate.pem
+          printf '%s\n' "$source_cert_sha" > dist/android-upload-certificate-sha256.txt
+          (cd dist && sha256sum "$(basename "$final_aab")" > SHA256SUMS.txt)
+          printf 'aab_path=%s\n' "$final_aab" >> "$GITHUB_OUTPUT"
+
+      - name: Upload production AAB
+        uses: actions/upload-artifact@v4
+        with:
+          name: SNAP-EBT-WIC-production-AAB-v${{ inputs.version_code }}
+          path: |
+            dist/*.aab
+            dist/SHA256SUMS.txt
+            dist/android-upload-certificate.pem
+            dist/android-upload-certificate-sha256.txt
+          if-no-files-found: error
+          retention-days: 30

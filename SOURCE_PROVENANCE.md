@@ -19,8 +19,8 @@ Play Billing adapter, notification handling, Android configuration, generated
 launcher assets, validation, and release automation. The business rules and UI
 remain in the canonical embedded web application.
 
-Production package identity:
-`com.goodusestudios.snapebtgrocerytracker`.
+Production package identity, aligned to the existing Play Console app:
+`com.lateefrazaqoyetola.snapebtwictracker`.
 
 QA package identity:
-`com.goodusestudios.snapebtgrocerytracker.qa`.
+`com.lateefrazaqoyetola.snapebtwictracker.qa`.

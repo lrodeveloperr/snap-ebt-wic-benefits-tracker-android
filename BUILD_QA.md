@@ -15,7 +15,7 @@ The workflow uses its run number as `versionCode`, validates the APK with Androi
 
 | Purpose | QA value |
 | --- | --- |
-| Package | `com.goodusestudios.snapebtgrocerytracker.qa` |
+| Package | `com.lateefrazaqoyetola.snapebtwictracker.qa` |
 | Build profile | `qa` |
 | Ad profile | explicit `test` runtime profile |
 | Purchase path | real Google Play Billing integration |
@@ -48,7 +48,7 @@ The ads wrapper is locked to the upstream-published 16.3.4 release, which resolv
 For a clean-state test, uninstall only the QA package first:
 
 ```sh
-adb uninstall com.goodusestudios.snapebtgrocerytracker.qa
+adb uninstall com.lateefrazaqoyetola.snapebtwictracker.qa
 ```
 
 Uninstalling erases that QA installation's on-device data.
@@ -77,7 +77,7 @@ Demo ads are appropriate for layout and lifecycle testing. Validate consent-regi
 
 `assembleRelease` emits an Expo template-development-signed APK. The workflow never distributes that signature: it realigns the APK for 16 KiB and 4 KiB devices, creates a modern short-lived QA keystore in the runner's temporary directory, and signs the staged APK with v1, v2, and v3 schemes. No keystore is uploaded with the artifact. The resulting signature is intentionally non-production and disposable, so installing a later run may require uninstalling the earlier QA build first.
 
-Production must use a separately protected upload key and the base application ID `com.goodusestudios.snapebtgrocerytracker`. Do not promote, rename, or upload the QA APK to Google Play.
+Production must use a separately protected upload key and the Play Console application ID `com.lateefrazaqoyetola.snapebtwictracker`. Do not promote, rename, or upload the QA APK to Google Play.
 
 ## Optional EAS definitions
 

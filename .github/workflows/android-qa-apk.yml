@@ -101,7 +101,7 @@ jobs:
           const buildProperties = config.plugins.find(
             (plugin) => Array.isArray(plugin) && plugin[0] === "expo-build-properties",
           );
-          if (config.android.package !== "com.goodusestudios.snapebtgrocerytracker.qa") {
+          if (config.android.package !== "com.lateefrazaqoyetola.snapebtwictracker.qa") {
             throw new Error(`Unexpected QA package: ${config.android.package}`);
           }
           if (config.android.versionCode !== Number(process.env.ANDROID_VERSION_CODE)) {
@@ -266,7 +266,7 @@ jobs:
           grep -F "Verified using v2 scheme (APK Signature Scheme v2): true" <<<"$signature_report"
           grep -F "Verified using v3 scheme (APK Signature Scheme v3): true" <<<"$signature_report"
           badging="$($aapt dump badging "$final_apk")"
-          grep -F "package: name='com.goodusestudios.snapebtgrocerytracker.qa'" <<<"$badging"
+          grep -F "package: name='com.lateefrazaqoyetola.snapebtwictracker.qa'" <<<"$badging"
           grep -F "targetSdkVersion:'36'" <<<"$badging"
           node scripts/verify-android.mjs "$final_apk"
           (

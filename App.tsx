@@ -52,8 +52,6 @@ const AD_BANNER_HEIGHT = 50;
 const AD_RAIL_SEPARATOR_HEIGHT = 10;
 const AD_RAIL_HEIGHT = AD_BANNER_HEIGHT + AD_RAIL_SEPARATOR_HEIGHT;
 const GOOGLE_DEMO_PUBLISHER_ID = "3940256099942544";
-const ANDROID_ADMOB_TEST_BANNER_ID =
-  "ca-app-pub-3940256099942544/6300978111";
 const PLAY_BILLING_CONNECTION_RETRY_DELAYS_MS = [0, 1000, 3000] as const;
 const PLAY_BILLING_ENTITLEMENT_RETRY_DELAYS_MS = [0, 500, 2000] as const;
 const MAX_SHARE_BYTES = 20 * 1024 * 1024;
@@ -1065,12 +1063,16 @@ export default function App() {
       productionAppId,
       productionBannerId,
     );
-  const adProfileConfigured = testAds || productionAdsConfigured;
-  const bannerUnitId = testAds
-    ? ANDROID_ADMOB_TEST_BANNER_ID
-    : productionAdsConfigured
-      ? productionBannerId
-      : "";
+  const testAppMatch = /^ca-app-pub-(\d{16})~\d{10}$/.exec(productionAppId);
+  const testBannerMatch = /^ca-app-pub-(\d{16})\/\d{10}$/.exec(
+    productionBannerId,
+  );
+  const testAdsConfigured =
+    testAds &&
+    testAppMatch?.[1] === GOOGLE_DEMO_PUBLISHER_ID &&
+    testBannerMatch?.[1] === GOOGLE_DEMO_PUBLISHER_ID;
+  const adProfileConfigured = testAdsConfigured || productionAdsConfigured;
+  const bannerUnitId = adProfileConfigured ? productionBannerId : "";
 
   useEffect(() => {
     try {

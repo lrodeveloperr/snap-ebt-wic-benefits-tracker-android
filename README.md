@@ -8,9 +8,9 @@ The app keeps grocery planning data on the device, supports SNAP/EBT and Puerto 
 
 | Setting | Production | QA |
 | --- | --- | --- |
-| Application ID | `com.goodusestudios.snapebtgrocerytracker` | `com.goodusestudios.snapebtgrocerytracker.qa` |
+| Application ID | `com.lateefrazaqoyetola.snapebtwictracker` | `com.lateefrazaqoyetola.snapebtwictracker.qa` |
 | Output | Play-ready AAB when built with the production profile | Directly installable APK |
-| Ads | Live app/banner IDs supplied outside source control | Google's official demo app/banner IDs only |
+| Ads | Approved live AdMob app/banner IDs, verified by the release job | Google's official demo app/banner IDs only |
 | Purchases | Google Play Billing non-consumable | Real Google Play Billing code; Play-track build required for billing QA |
 | SDK | compile/target 36, minimum 24 | compile/target 36, minimum 24 |
 
@@ -66,12 +66,12 @@ The expected Gradle output is `android/app/build/outputs/apk/release/app-release
 
 ## Production boundary
 
-Set `EXPO_PUBLIC_BUILD_PROFILE=production` and `EXPO_PUBLIC_AD_PROFILE=production` only in a protected release job. Production config keeps the base package name and refuses Google's demo publisher ID. It requires these live Android values from protected secrets:
+The manual **Android Production AAB** workflow is the release boundary. It fixes `EXPO_PUBLIC_BUILD_PROFILE=production`, `EXPO_PUBLIC_AD_PROFILE=production`, the approved live AdMob IDs, and the Play package `com.lateefrazaqoyetola.snapebtwictracker`. Production config rejects Google's demo publisher ID or any publisher mismatch.
 
-- `EXPO_PUBLIC_ANDROID_ADMOB_APP_ID`
-- `EXPO_PUBLIC_ANDROID_ADMOB_BANNER_ID`
-- `EXPO_PUBLIC_ADMOB_PUBLISHER_ID`
+The job accepts an unused positive Play version code, runs source/type/tests, regenerates and verifies Android, removes Expo's debug release signing, builds an unsigned bundle, signs it with the long-lived upload key, validates it with Bundletool, and publishes the AAB plus checksum and public upload certificate as a private Actions artifact.
 
-The `production` EAS profile remains an AAB definition, but the QA workflow does not use EAS. A Play release still needs a unique version code, Play App Signing/upload-key configuration, the `remove_ads_lifetime` in-app product, store declarations, and release-track testing. Never commit signing files or live advertising credentials.
+The private repository must define `ANDROID_UPLOAD_KEYSTORE_BASE64`, `ANDROID_UPLOAD_KEYSTORE_PASSWORD`, `ANDROID_UPLOAD_KEY_ALIAS`, `ANDROID_UPLOAD_KEY_PASSWORD`, and `ANDROID_UPLOAD_CERT_SHA256` as encrypted Actions secrets. The release key contract is a PKCS12 keystore containing an RSA upload key; the workflow signs with SHA256withRSA. It never uploads the keystore. Never commit signing files or passwords. After building, upload the AAB to the Play internal-testing release and retain the upload key independently of GitHub.
+
+The Play listing still needs the one-time `remove_ads_lifetime` product, store declarations, and Play-track billing/ads verification. The `production` EAS profile remains available, but this repository's guarded production workflow is the documented first-release path.
 
 See [BUILD_QA.md](BUILD_QA.md) for the complete QA handoff.

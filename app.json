@@ -50,7 +50,7 @@
       "expo-iap"
     ],
     "android": {
-      "package": "com.goodusestudios.snapebtgrocerytracker",
+      "package": "com.lateefrazaqoyetola.snapebtwictracker",
       "versionCode": 1,
       "allowBackup": false,
       "permissions": [

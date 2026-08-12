@@ -17,7 +17,7 @@ import type {
 } from "expo-iap";
 
 export const REMOVE_ADS_PRODUCT_ID = "remove_ads_lifetime";
-const ANDROID_PACKAGE_NAME = "com.goodusestudios.snapebtgrocerytracker";
+const ANDROID_PACKAGE_NAME = "com.lateefrazaqoyetola.snapebtwictracker";
 
 export type RemoveAdsProduct = {
   displayName: string;

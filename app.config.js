@@ -1,5 +1,6 @@
-const ANDROID_PACKAGE = "com.goodusestudios.snapebtgrocerytracker";
+const ANDROID_PACKAGE = "com.lateefrazaqoyetola.snapebtwictracker";
 const TEST_ANDROID_APP_ID = "ca-app-pub-3940256099942544~3347511713";
+const TEST_ANDROID_BANNER_ID = "ca-app-pub-3940256099942544/6300978111";
 const GOOGLE_TEST_PUBLISHER = "ca-app-pub-3940256099942544";
 
 const ANDROID_PRODUCTION_KEYS = [
@@ -58,6 +59,11 @@ module.exports = ({ config }) => {
         `Production AdMob configuration rejected. Missing: ${missing.join(", ") || "none"}. Test IDs: ${testIds.join(", ") || "none"}. Publisher ownership valid: ${!invalidOwnership}.`,
       );
     }
+  } else if (
+    process.env.EXPO_PUBLIC_ANDROID_ADMOB_APP_ID !== TEST_ANDROID_APP_ID ||
+    process.env.EXPO_PUBLIC_ANDROID_ADMOB_BANNER_ID !== TEST_ANDROID_BANNER_ID
+  ) {
+    throw new Error("QA builds require Google's fixed Android demo app and banner IDs.");
   }
 
   const androidAppId = production

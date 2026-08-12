@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-readonly package_name="com.goodusestudios.snapebtgrocerytracker.qa"
+readonly package_name="com.lateefrazaqoyetola.snapebtwictracker.qa"
 readonly apk_path="dist/snap-ebt-wic-benefits-tracker-qa.apk"
 
 if [[ ! -f "$apk_path" ]]; then

@@ -7,7 +7,7 @@ const APPROVED_ICON_SHA256 =
   "a2893e96e83fed237c7063747c1f41c10c30ea85e3911149c13b02bfa861f808";
 const TEST_APP_ID = "ca-app-pub-3940256099942544~3347511713";
 const TEST_BANNER_ID = "ca-app-pub-3940256099942544/6300978111";
-const PACKAGE = "com.goodusestudios.snapebtgrocerytracker";
+const PACKAGE = "com.lateefrazaqoyetola.snapebtwictracker";
 const LEGAL_ORIGIN = "https://lrodeveloperr.github.io/snap-wic-benefits-tracker-legal";
 
 const read = (path) => readFile(path, "utf8");
@@ -28,6 +28,8 @@ const [
   installedAdsPackageText,
   qaWorkflow,
   installProof,
+  productionWorkflow,
+  productionVerifier,
 ] =
   await Promise.all([
     read("app.html"),
@@ -40,6 +42,8 @@ const [
     read("node_modules/react-native-google-mobile-ads/package.json"),
     read(".github/workflows/android-qa-apk.yml"),
     read("scripts/prove-android-install.sh"),
+    read(".github/workflows/android-production-aab.yml"),
+    read("scripts/verify-android-production.mjs"),
   ]);
 const appJson = JSON.parse(appJsonText);
 const packageJson = JSON.parse(packageText);
@@ -94,7 +98,7 @@ for (const path of ["/terms/", "/privacy/", "/support/", "/official-sources/"]) 
   mustContain(html, `${LEGAL_ORIGIN}${path}`, `canonical legal link ${path}`);
 }
 
-mustContain(app, TEST_BANNER_ID, "Google Android demo banner ID");
+mustNotContain(app, TEST_BANNER_ID, "hard-coded Google Android demo banner ID in runtime source");
 mustContain(app, "requestNonPersonalizedAdsOnly: true", "non-personalized ad request");
 mustContain(app, "<BannerAd", "single banner format");
 mustContain(app, "legalReady &&", "native legal ad gate");
@@ -116,10 +120,12 @@ mustNotContain(app, "AD_SLOT_BOTTOM", "hard-coded banner offset");
 mustNotContain(app, "InterstitialAd", "interstitial ads");
 mustNotContain(app, "RewardedAd", "rewarded ads");
 mustContain(appConfig, TEST_APP_ID, "Google Android demo app ID");
+mustContain(appConfig, TEST_BANNER_ID, "Google Android demo banner ID");
 mustContain(appConfig, "ANDROID_PRODUCTION_KEYS", "production AdMob checks");
 mustContain(appConfig, "invalidOwnership", "production publisher ownership check");
 
 mustContain(billing, 'REMOVE_ADS_PRODUCT_ID = "remove_ads_lifetime"');
+mustContain(billing, `ANDROID_PACKAGE_NAME = "${PACKAGE}"`, "Play package billing validation");
 mustContain(billing, 'type: "in-app"', "one-time Play product type");
 mustContain(billing, "getAvailablePurchases", "owned Play purchase query");
 mustContain(billing, 'purchase.store !== "google"', "Google purchase validation");
@@ -169,6 +175,23 @@ assert.ok(
     qaWorkflow.indexOf("- name: Prove APK installs on Android 15"),
   "validated APK must be preserved before emulator infrastructure runs",
 );
+mustContain(productionWorkflow, "workflow_dispatch:", "manual production release trigger");
+mustNotContain(productionWorkflow, "push:", "automatic production release trigger");
+mustContain(productionWorkflow, "ca-app-pub-8054612600809568~2189058911", "live Android AdMob app ID");
+mustContain(productionWorkflow, "ca-app-pub-8054612600809568/5751919465", "live Android banner ID");
+mustContain(productionWorkflow, "ANDROID_UPLOAD_KEYSTORE_BASE64", "protected upload keystore");
+mustContain(productionWorkflow, ":app:bundleRelease", "production bundle build");
+mustContain(productionWorkflow, "jarsigner", "AAB upload-key signing");
+mustContain(productionWorkflow, "bundletool_version=\"1.18.3\"", "pinned bundletool validation");
+mustContain(
+  productionWorkflow,
+  "a099cfa1543f55593bc2ed16a70a7c67fe54b1747bb7301f37fdfd6d91028e29",
+  "pinned bundletool checksum",
+);
+mustContain(productionWorkflow, "Upload production AAB", "production artifact handoff");
+mustContain(productionVerifier, PACKAGE, "production verifier package");
+mustContain(productionVerifier, "ca-app-pub-8054612600809568~2189058911", "production verifier app ID");
+mustContain(productionVerifier, "ca-app-pub-8054612600809568/5751919465", "production verifier banner ID");
 
 for (const path of ["assets/icon.png", "assets/brand-logo-ui.png", "assets/splash-icon.png"]) {
   const bytes = await readFile(path);

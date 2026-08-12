@@ -3,6 +3,7 @@ node_modules/
 dist/
 bundle-check/
 bundle-final/
+release-private/
 .test-build/
 coverage/
 *.log
