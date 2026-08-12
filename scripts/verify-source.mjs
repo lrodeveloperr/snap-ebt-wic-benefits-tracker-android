@@ -101,9 +101,13 @@ mustContain(app, 'id="android-native-layout"', "Android-only layout layer");
 mustContain(app, 'data-native-platform="android"', "Android document marker");
 mustContain(app, "-webkit-text-size-adjust: 100%", "stable Android WebView text scale");
 mustContain(app, "grid-template-columns: minmax(0, 1fr)", "shrinkable Android grids");
+mustContain(app, '.report-filters > *', "shrinkable Android report filters");
+mustContain(app, "padding-right: 12px !important", "effective narrow Android gutter");
 mustContain(app, "textZoom={100}", "explicit Android WebView text zoom");
 mustContain(app, "runtime.setRuntimeBannerHeight(0)", "native-flow ad layout");
 mustContain(app, "styles.bannerRail", "native-flow banner rail");
+mustContain(app, 'accessibilityElementsHidden={!bannerVisible}', "hidden-ad accessibility gate");
+mustContain(app, 'bannerVisible ? "auto" : "no-hide-descendants"', "hidden-ad TalkBack gate");
 mustNotContain(app, "bannerOverlay", "absolute banner overlay");
 mustNotContain(app, "AD_SLOT_BOTTOM", "hard-coded banner offset");
 mustNotContain(app, "InterstitialAd", "interstitial ads");
@@ -143,6 +147,7 @@ mustContain(qaWorkflow, "-sigalg SHA256withRSA", "modern QA certificate signatur
 mustContain(qaWorkflow, "--v1-signing-enabled true", "APK v1 signature");
 mustContain(qaWorkflow, "--v2-signing-enabled true", "APK v2 signature");
 mustContain(qaWorkflow, "--v3-signing-enabled true", "APK v3 signature");
+mustContain(qaWorkflow, "--min-sdk-version 23", "APK v1 verification floor");
 mustContain(qaWorkflow, "--max-sdk-version 23", "APK v1 compatibility verification");
 mustContain(qaWorkflow, "adb install --no-streaming", "Android 15 install smoke test");
 
