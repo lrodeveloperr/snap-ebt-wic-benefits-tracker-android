@@ -153,12 +153,20 @@ jobs:
           const fs = require("node:fs");
           const file = "android/app/build.gradle";
           let source = fs.readFileSync(file, "utf8");
-          const line = "            signingConfig = signingConfigs.debug\n";
-          const occurrences = source.split(line).length - 1;
+          const releaseMarker = "        release {";
+          const releaseStart = source.indexOf(releaseMarker);
+          if (releaseStart < 0 || source.indexOf(releaseMarker, releaseStart + 1) >= 0) {
+            throw new Error("Expected exactly one generated release build block.");
+          }
+          const prefix = source.slice(0, releaseStart);
+          let releaseAndRemainder = source.slice(releaseStart);
+          const signingLine = /^\s*signingConfig\s*=\s*signingConfigs\.debug\s*$/gm;
+          const occurrences = [...releaseAndRemainder.matchAll(signingLine)].length;
           if (occurrences !== 1) {
             throw new Error(`Expected one generated release debug signing line; found ${occurrences}.`);
           }
-          source = source.replace(line, "");
+          releaseAndRemainder = releaseAndRemainder.replace(signingLine, "");
+          source = prefix + releaseAndRemainder;
           fs.writeFileSync(file, source);
           NODE
 
