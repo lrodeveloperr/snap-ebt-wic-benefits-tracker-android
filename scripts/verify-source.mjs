@@ -151,6 +151,18 @@ mustContain(qaWorkflow, "--v3-signing-enabled true", "APK v3 signature");
 mustContain(qaWorkflow, "--min-sdk-version 23", "APK v1 verification floor");
 mustContain(qaWorkflow, "--max-sdk-version 23", "APK v1 compatibility verification");
 mustContain(qaWorkflow, "adb install --no-streaming", "Android 15 install smoke test");
+mustContain(
+  qaWorkflow,
+  "reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d",
+  "pinned Android emulator runner",
+);
+mustContain(qaWorkflow, "target: aosp_atd", "lean Android 15 test image");
+mustContain(qaWorkflow, "emulator-boot-timeout: 420", "bounded Android emulator boot");
+assert.ok(
+  qaWorkflow.indexOf("- name: Upload QA APK") <
+    qaWorkflow.indexOf("- name: Prove APK installs on Android 15"),
+  "validated APK must be preserved before emulator infrastructure runs",
+);
 
 for (const path of ["assets/icon.png", "assets/brand-logo-ui.png", "assets/splash-icon.png"]) {
   const bytes = await readFile(path);

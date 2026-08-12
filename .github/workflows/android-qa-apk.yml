@@ -272,59 +272,7 @@ jobs:
           sha256sum "$final_apk" | tee dist/SHA256SUMS.txt
           echo "path=$final_apk" >> "$GITHUB_OUTPUT"
 
-      - name: Prove APK installs on Android 15
-        timeout-minutes: 12
-        shell: bash
-        run: |
-          set -euo pipefail
-          system_image="system-images;android-35;google_apis;x86_64"
-          sdkmanager "emulator" "$system_image"
-          echo no | avdmanager create avd \
-            --force \
-            --name snap-qa-api-35 \
-            --package "$system_image" \
-            --device pixel_6
-
-          acceleration=(-accel off)
-          if [[ -e /dev/kvm ]]; then
-            sudo chmod 666 /dev/kvm
-            acceleration=(-accel on)
-          fi
-          emulator_log="$RUNNER_TEMP/android-emulator.log"
-          "$ANDROID_HOME/emulator/emulator" \
-            -avd snap-qa-api-35 \
-            -no-window \
-            -no-audio \
-            -no-boot-anim \
-            -no-snapshot \
-            -gpu swiftshader_indirect \
-            "${acceleration[@]}" >"$emulator_log" 2>&1 &
-          emulator_pid=$!
-          trap 'adb emu kill >/dev/null 2>&1 || true; kill "$emulator_pid" >/dev/null 2>&1 || true' EXIT
-
-          timeout 240 adb wait-for-device
-          booted=false
-          for _ in {1..120}; do
-            if [[ "$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" == "1" ]]; then
-              booted=true
-              break
-            fi
-            sleep 2
-          done
-          if [[ "$booted" != true ]]; then
-            cat "$emulator_log"
-            exit 1
-          fi
-
-          adb install --no-streaming -r dist/snap-ebt-wic-benefits-tracker-qa.apk
-          installed_path="$(adb shell pm path com.goodusestudios.snapebtgrocerytracker.qa | tr -d '\r')"
-          [[ "$installed_path" == package:* ]] || {
-            echo "QA package was not installed: $installed_path" >&2
-            exit 1
-          }
-          adb shell dumpsys package com.goodusestudios.snapebtgrocerytracker.qa \
-            | grep -F "versionCode=${ANDROID_VERSION_CODE}"
-
+      # Preserve a fully validated APK even if the hosted emulator itself is unavailable.
       - name: Upload QA APK
         uses: actions/upload-artifact@v4
         with:
@@ -334,3 +282,44 @@ jobs:
             dist/SHA256SUMS.txt
           if-no-files-found: error
           retention-days: 14
+
+      - name: Enable KVM for Android emulator
+        shell: bash
+        run: |
+          if [[ -e /dev/kvm ]]; then
+            echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+              | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+            sudo udevadm control --reload-rules
+            sudo udevadm trigger --name-match=kvm
+            sudo chmod 666 /dev/kvm
+            ls -l /dev/kvm
+          else
+            echo "KVM is unavailable; the emulator runner will use its safe fallback."
+          fi
+
+      - name: Prove APK installs on Android 15
+        timeout-minutes: 15
+        uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d
+        with:
+          api-level: 35
+          target: aosp_atd
+          arch: x86_64
+          profile: pixel_6
+          cores: 2
+          ram-size: 2048M
+          emulator-boot-timeout: 420
+          disable-linux-hw-accel: auto
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none -no-metrics
+          script: |
+            bash -euo pipefail <<'BASH'
+            adb devices -l
+            adb install --no-streaming -r dist/snap-ebt-wic-benefits-tracker-qa.apk
+            installed_path="$(adb shell pm path com.goodusestudios.snapebtgrocerytracker.qa | tr -d '\r')"
+            [[ "$installed_path" == package:* ]] || {
+              echo "QA package was not installed: $installed_path" >&2
+              exit 1
+            }
+            adb shell dumpsys package com.goodusestudios.snapebtgrocerytracker.qa \
+              | grep -F "versionCode=${ANDROID_VERSION_CODE}"
+            BASH
