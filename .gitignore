@@ -1,0 +1,16 @@
+node_modules/
+.expo/
+dist/
+bundle-check/
+bundle-final/
+.test-build/
+coverage/
+*.log
+.DS_Store
+android/
+ios/
+*.jks
+*.keystore
+*.p8
+*.p12
+*.mobileprovision

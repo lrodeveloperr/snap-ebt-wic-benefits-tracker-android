@@ -1,0 +1,34 @@
+{
+  "cli": {
+    "version": ">= 16.0.0"
+  },
+  "build": {
+    "preview": {
+      "distribution": "internal",
+      "environment": "preview",
+      "env": {
+        "EXPO_PUBLIC_BUILD_PROFILE": "qa",
+        "EXPO_PUBLIC_AD_PROFILE": "test",
+        "EXPO_PUBLIC_ANDROID_ADMOB_APP_ID": "ca-app-pub-3940256099942544~3347511713",
+        "EXPO_PUBLIC_ANDROID_ADMOB_BANNER_ID": "ca-app-pub-3940256099942544/6300978111"
+      },
+      "android": {
+        "buildType": "apk"
+      }
+    },
+    "production": {
+      "autoIncrement": true,
+      "environment": "production",
+      "env": {
+        "EXPO_PUBLIC_BUILD_PROFILE": "production",
+        "EXPO_PUBLIC_AD_PROFILE": "production"
+      },
+      "android": {
+        "buildType": "app-bundle"
+      }
+    }
+  },
+  "submit": {
+    "production": {}
+  }
+}

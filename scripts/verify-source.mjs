@@ -1,0 +1,135 @@
+import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
+import { readFile, stat } from "node:fs/promises";
+import vm from "node:vm";
+
+const APPROVED_ICON_SHA256 =
+  "a2893e96e83fed237c7063747c1f41c10c30ea85e3911149c13b02bfa861f808";
+const TEST_APP_ID = "ca-app-pub-3940256099942544~3347511713";
+const TEST_BANNER_ID = "ca-app-pub-3940256099942544/6300978111";
+const PACKAGE = "com.goodusestudios.snapebtgrocerytracker";
+const LEGAL_ORIGIN = "https://lrodeveloperr.github.io/snap-wic-benefits-tracker-legal";
+
+const read = (path) => readFile(path, "utf8");
+const sha256 = (bytes) => createHash("sha256").update(bytes).digest("hex");
+const mustContain = (source, value, label = value) =>
+  assert.ok(source.includes(value), `missing ${label}`);
+const mustNotContain = (source, value, label = value) =>
+  assert.ok(!source.includes(value), `forbidden ${label}`);
+
+const [html, app, billing, appConfig, appJsonText, packageText, provenance] =
+  await Promise.all([
+    read("app.html"),
+    read("App.tsx"),
+    read("src/removeAdsPurchase.ts"),
+    read("app.config.js"),
+    read("app.json"),
+    read("package.json"),
+    read("SOURCE_PROVENANCE.md"),
+  ]);
+const appJson = JSON.parse(appJsonText);
+const packageJson = JSON.parse(packageText);
+
+assert.match(html.trimStart(), /^<!doctype html>/i);
+assert.match(html, /<\/html>\s*$/i);
+
+const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/gi)].map(
+  (match) => match[1],
+);
+assert.ok(scripts.length >= 5, "canonical HTML scripts are missing");
+scripts.forEach((source, index) =>
+  new vm.Script(source, { filename: `canonical-inline-${index + 1}.js` }),
+);
+
+const storesMatch = html.match(/window\.STORES=(\[[\s\S]*?\]);window\.GROCERY_CATALOG=/);
+const catalogMatch = html.match(/window\.GROCERY_CATALOG=(\[[\s\S]*?\]);<\/script>/);
+assert.ok(storesMatch && catalogMatch, "catalog payload is missing");
+assert.equal(JSON.parse(storesMatch[1]).length, 243, "store catalog changed unexpectedly");
+assert.equal(JSON.parse(catalogMatch[1]).length, 687, "grocery catalog changed unexpectedly");
+
+const messageBaseMatch = html.match(/const MESSAGES=(\{[\s\S]*?\});\s*\n\s*Object\.assign/);
+assert.ok(messageBaseMatch, "base translations are missing");
+const messages = JSON.parse(messageBaseMatch[1]);
+const patchPattern = /Object\.assign\(MESSAGES\['(en-US|es-PR)'\],\s*(\{[\s\S]*?\})\s*\);/g;
+for (const match of html.matchAll(patchPattern)) {
+  Object.assign(messages[match[1]], vm.runInNewContext(`(${match[2]})`));
+}
+assert.deepEqual(
+  Object.keys(messages["en-US"]).sort(),
+  Object.keys(messages["es-PR"]).sort(),
+  "translation catalogs must have identical keys",
+);
+assert.equal(messages["en-US"]["purchase.subtitle"], "One-time Google Play purchase. No subscription.");
+assert.match(messages["es-PR"]["purchase.subtitle"], /Google Play/);
+assert.doesNotMatch(messages["en-US"]["app.webTitle"], /iOS|iPhone|App Store|Apple Account/);
+assert.doesNotMatch(messages["es-PR"]["app.webTitle"], /iOS|iPhone|App Store|Cuenta de Apple/);
+
+mustContain(html, "const TERMS_VERSION='2026-08-11'", "pinned Terms version");
+mustContain(html, "onboarded:false", "fresh state onboarding gate");
+mustContain(html, "legalAcceptance:null", "fresh state legal acceptance");
+mustContain(html, "seq=['legal','program']", "legal-first onboarding sequence");
+mustContain(html, "id=\"onAgeConfirmed\"", "adult confirmation checkbox");
+mustContain(html, "id=\"onTermsAccepted\"", "Terms and Privacy checkbox");
+mustContain(html, "privacyAcknowledged:true", "Privacy acknowledgment record");
+mustContain(html, "if(!state.onboarded){", "onboarding route guard");
+mustContain(html, "if(!hasCurrentLegalAcceptance(state)){", "Terms route guard");
+mustContain(html, "el('shell').classList.add('hidden')", "hidden tracker shell");
+mustContain(html, "type:'legal-ready',ready:!!state.onboarded&&hasCurrentLegalAcceptance(state)", "native legal gate");
+for (const path of ["/terms/", "/privacy/", "/support/", "/official-sources/"]) {
+  mustContain(html, `${LEGAL_ORIGIN}${path}`, `canonical legal link ${path}`);
+}
+
+mustContain(app, TEST_BANNER_ID, "Google Android demo banner ID");
+mustContain(app, "requestNonPersonalizedAdsOnly: true", "non-personalized ad request");
+mustContain(app, "<BannerAd", "single banner format");
+mustContain(app, "legalReady &&", "native legal ad gate");
+mustContain(app, 'removeAdsEntitlement === "not-entitled"', "free-user ad gate");
+mustNotContain(app, "InterstitialAd", "interstitial ads");
+mustNotContain(app, "RewardedAd", "rewarded ads");
+mustContain(appConfig, TEST_APP_ID, "Google Android demo app ID");
+mustContain(appConfig, "ANDROID_PRODUCTION_KEYS", "production AdMob checks");
+mustContain(appConfig, "invalidOwnership", "production publisher ownership check");
+
+mustContain(billing, 'REMOVE_ADS_PRODUCT_ID = "remove_ads_lifetime"');
+mustContain(billing, 'type: "in-app"', "one-time Play product type");
+mustContain(billing, "getAvailablePurchases", "owned Play purchase query");
+mustContain(billing, 'purchase.store !== "google"', "Google purchase validation");
+mustContain(billing, "isConsumable: false", "non-consumable acknowledgement");
+mustNotContain(billing, 'type: "subs"', "subscription product type");
+mustNotContain(billing.toLowerCase(), "monthly", "monthly billing plan");
+mustNotContain(billing.toLowerCase(), "annual", "annual billing plan");
+
+mustContain(app, "setNotificationChannelAsync", "Android notification channel");
+mustContain(app, "requestPermissionsAsync", "Android notification permission request");
+mustContain(app, "enableVibrate: false", "silent reminder channel");
+mustContain(app, "onRenderProcessGone", "Android WebView recovery");
+mustContain(app, "BackHandler.addEventListener", "Android hardware back handling");
+
+assert.equal(appJson.expo.name, "SNAP-EBT & WIC Benefits Tracker");
+assert.deepEqual(appJson.expo.platforms, ["android"]);
+assert.equal(appJson.expo.android.package, PACKAGE);
+assert.equal(appJson.expo.android.allowBackup, false);
+assert.ok(appJson.expo.android.permissions.includes("android.permission.POST_NOTIFICATIONS"));
+assert.ok(appJson.expo.android.blockedPermissions.includes("android.permission.VIBRATE"));
+assert.equal(packageJson.name, "snap-ebt-wic-benefits-tracker-android");
+
+for (const path of ["assets/icon.png", "assets/brand-logo-ui.png", "assets/splash-icon.png"]) {
+  const bytes = await readFile(path);
+  assert.equal(sha256(bytes), APPROVED_ICON_SHA256, `${path} is not the reviewed artwork`);
+}
+for (const path of ["assets/android-icon-foreground.png", "assets/android-icon-monochrome.png"]) {
+  const bytes = await readFile(path);
+  assert.equal(bytes.subarray(0, 8).toString("hex"), "89504e470d0a1a0a", `${path} is not PNG`);
+  assert.ok((await stat(path)).size > 10_000, `${path} is unexpectedly small`);
+}
+
+const generated = await read("src/appHtml.ts");
+const expectedHtmlDigest = sha256(Buffer.from(html));
+mustContain(generated, `APP_HTML_SHA256 = \"${expectedHtmlDigest}\"`, "embedded HTML digest");
+mustContain(generated, "data:image/png;base64,", "embedded reviewed logo");
+mustNotContain(generated, "assets/brand-logo-ui.png", "unembedded logo path");
+
+mustContain(provenance, "03d1dd013f215938b82ca1601c88301c9d5ed518", "source commit provenance");
+mustContain(provenance, "23d938c18df0e185e54946759a3075ef42ce2a6cbc3a0bff99b3a085387e4fcd", "source archive provenance");
+
+console.log("Android source verification passed.");

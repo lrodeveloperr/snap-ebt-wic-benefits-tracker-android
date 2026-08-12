@@ -1,0 +1,54 @@
+{
+  "name": "snap-ebt-wic-benefits-tracker-android",
+  "version": "1.0.0",
+  "private": true,
+  "main": "index.ts",
+  "scripts": {
+    "start": "npm run embed:web && expo start --android",
+    "android": "npm run embed:web && expo run:android",
+    "embed:web": "node scripts/embed-web-app.mjs",
+    "prepare:android-assets": "node scripts/prepare-android-assets.mjs",
+    "typecheck": "tsc --noEmit",
+    "test:core": "node --test tests/shared-core.test.mjs",
+    "generate:notices": "node scripts/generate-notices.mjs",
+    "verify:source": "node scripts/verify-source.mjs",
+    "verify:android": "node scripts/verify-android.mjs",
+    "validate:source": "npm run prepare:android-assets && npm run embed:web && npm run typecheck && npm run test:core && npm run verify:source",
+    "prebuild:android": "npm run validate:source && expo prebuild --platform android --clean",
+    "validate": "npm run validate:source"
+  },
+  "dependencies": {
+    "buffer": "^6.0.3",
+    "expo": "~57.0.9",
+    "expo-build-properties": "~57.0.8",
+    "expo-crypto": "~57.0.1",
+    "expo-file-system": "~57.0.1",
+    "expo-iap": "5.2.4",
+    "expo-notifications": "~57.0.10",
+    "expo-print": "~57.0.1",
+    "expo-sharing": "~57.0.8",
+    "expo-splash-screen": "~57.0.5",
+    "expo-sqlite": "~57.0.1",
+    "expo-status-bar": "~57.0.1",
+    "expo-store-review": "~57.0.1",
+    "expo-system-ui": "~57.0.2",
+    "jszip": "^3.10.1",
+    "react": "19.2.3",
+    "react-native": "0.86.2",
+    "react-native-google-mobile-ads": "16.4.0",
+    "react-native-safe-area-context": "~5.7.0",
+    "react-native-webview": "14.0.1"
+  },
+  "devDependencies": {
+    "@testing-library/react-native": "14.0.1",
+    "@types/jest": "29.5.14",
+    "@types/node": "26.1.2",
+    "@types/react": "~19.2.2",
+    "jest": "29.7.0",
+    "jest-expo": "~57.0.3",
+    "typescript": "~6.0.3"
+  },
+  "overrides": {
+    "uuid": "^11.1.1"
+  }
+}

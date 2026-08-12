@@ -1,0 +1,215 @@
+name: Android QA APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  build-qa-apk:
+    name: Build installable QA APK
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[build-apk]')
+    concurrency:
+      group: android-qa-apk-${{ github.ref }}
+      cancel-in-progress: true
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      CI: "1"
+      EXPO_NO_TELEMETRY: "1"
+      EXPO_PUBLIC_BUILD_PROFILE: qa
+      EXPO_PUBLIC_AD_PROFILE: test
+      ANDROID_VERSION_CODE: ${{ github.run_number }}
+      EXPO_PUBLIC_ANDROID_ADMOB_APP_ID: ca-app-pub-3940256099942544~3347511713
+      EXPO_PUBLIC_ANDROID_ADMOB_BANNER_ID: ca-app-pub-3940256099942544/6300978111
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Use Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Use JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android API 36
+        shell: bash
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0"
+
+      - name: Install JavaScript dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Verify locked native dependency versions
+        run: |
+          node - <<'NODE'
+          const assert = require("node:assert/strict");
+          const pkg = require("./package.json");
+          const lock = require("./package-lock.json");
+          const expected = {
+            expo: "57.0.9",
+            "react-native": "0.86.2",
+            "react-native-webview": "14.0.1",
+            "react-native-google-mobile-ads": "16.4.0",
+            "expo-notifications": "57.0.10",
+            "expo-iap": "5.2.4",
+          };
+          for (const [name, version] of Object.entries(expected)) {
+            assert.equal(
+              lock.packages?.[`node_modules/${name}`]?.version,
+              version,
+              `${name} must stay locked to ${version}`,
+            );
+          }
+          assert.equal(pkg.dependencies.expo, "~57.0.9");
+          assert.equal(pkg.dependencies["react-native"], "0.86.2");
+          NODE
+
+      - name: Prepare embedded app and Android assets
+        run: |
+          node scripts/embed-web-app.mjs
+          node scripts/prepare-android-assets.mjs
+
+      - name: Validate source, types, and tests
+        run: npm run validate:source
+
+      - name: Verify resolved QA configuration
+        shell: bash
+        run: |
+          npx expo config --type prebuild --json > "$RUNNER_TEMP/expo-config.json"
+          node - <<'NODE'
+          const fs = require("node:fs");
+          const config = JSON.parse(fs.readFileSync(process.env.RUNNER_TEMP + "/expo-config.json", "utf8"));
+          const buildProperties = config.plugins.find(
+            (plugin) => Array.isArray(plugin) && plugin[0] === "expo-build-properties",
+          );
+          if (config.android.package !== "com.goodusestudios.snapebtgrocerytracker.qa") {
+            throw new Error(`Unexpected QA package: ${config.android.package}`);
+          }
+          if (config.android.versionCode !== Number(process.env.ANDROID_VERSION_CODE)) {
+            throw new Error(`Unexpected versionCode: ${config.android.versionCode}`);
+          }
+          const androidBuild = buildProperties?.[1]?.android;
+          if (
+            androidBuild?.minSdkVersion !== 24 ||
+            androidBuild?.compileSdkVersion !== 36 ||
+            androidBuild?.targetSdkVersion !== 36 ||
+            androidBuild?.buildToolsVersion !== "36.0.0"
+          ) {
+            throw new Error("Unexpected resolved Android SDK configuration.");
+          }
+          if (
+            config.name !== "SNAP-EBT & WIC Benefits Tracker QA" ||
+            config.extra?.buildProfile !== "qa" ||
+            JSON.stringify(config.platforms) !== JSON.stringify(["android"])
+          ) {
+            throw new Error("Unexpected resolved QA application metadata.");
+          }
+          if (!config.android.permissions.includes("android.permission.POST_NOTIFICATIONS")) {
+            throw new Error("Android reminder notification permission is missing.");
+          }
+          const ads = config.plugins.find(
+            (plugin) => Array.isArray(plugin) && plugin[0] === "react-native-google-mobile-ads",
+          );
+          if (ads?.[1]?.androidAppId !== "ca-app-pub-3940256099942544~3347511713") {
+            throw new Error("QA config does not use Google's demo AdMob app ID.");
+          }
+          if (
+            process.env.EXPO_PUBLIC_ANDROID_ADMOB_BANNER_ID !==
+            "ca-app-pub-3940256099942544/6300978111"
+          ) {
+            throw new Error("QA config does not use Google's fixed Android demo banner ID.");
+          }
+          NODE
+
+      - name: Generate Android project
+        run: npx expo prebuild --clean --platform android --no-install
+
+      - name: Verify generated Android project
+        run: node scripts/verify-android.mjs
+
+      - name: Configure Gradle cache
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Build standalone release APK
+        working-directory: android
+        run: ./gradlew :app:assembleRelease --no-daemon --stacktrace
+
+      - name: Validate and stage installable APK
+        id: apk
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          release_apks=(android/app/build/outputs/apk/release/*.apk)
+          if (( ${#release_apks[@]} == 0 )); then
+            echo "No release APK was produced." >&2
+            exit 1
+          fi
+          source_apk="${release_apks[0]}"
+
+          mkdir -p dist
+          final_apk="dist/snap-ebt-wic-benefits-tracker-qa.apk"
+          apksigner="$ANDROID_HOME/build-tools/36.0.0/apksigner"
+          aapt="$ANDROID_HOME/build-tools/36.0.0/aapt"
+          zipalign="$ANDROID_HOME/build-tools/36.0.0/zipalign"
+
+          if "$apksigner" verify "$source_apk" >/dev/null 2>&1; then
+            cp "$source_apk" "$final_apk"
+          else
+            aligned_apk="$RUNNER_TEMP/snap-ebt-wic-benefits-tracker-qa-aligned.apk"
+            qa_keystore="$RUNNER_TEMP/snap-ebt-wic-benefits-tracker-qa.p12"
+            "$zipalign" -f -p 4 "$source_apk" "$aligned_apk"
+            keytool -genkeypair -noprompt \
+              -storetype PKCS12 \
+              -keystore "$qa_keystore" \
+              -storepass android \
+              -keypass android \
+              -alias qa \
+              -keyalg RSA \
+              -keysize 2048 \
+              -validity 30 \
+              -dname "CN=SNAP EBT QA,OU=QA,O=Good Use Studios,L=Test,ST=Test,C=US"
+            "$apksigner" sign \
+              --ks "$qa_keystore" \
+              --ks-key-alias qa \
+              --ks-pass pass:android \
+              --key-pass pass:android \
+              --out "$final_apk" \
+              "$aligned_apk"
+          fi
+
+          "$apksigner" verify --verbose --print-certs "$final_apk"
+          badging="$($aapt dump badging "$final_apk")"
+          grep -F "package: name='com.goodusestudios.snapebtgrocerytracker.qa'" <<<"$badging"
+          grep -F "targetSdkVersion:'36'" <<<"$badging"
+          node scripts/verify-android.mjs "$final_apk"
+          sha256sum "$final_apk" | tee dist/SHA256SUMS.txt
+          echo "path=$final_apk" >> "$GITHUB_OUTPUT"
+
+      - name: Upload QA APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: snap-ebt-wic-benefits-tracker-qa-${{ github.run_number }}
+          path: |
+            ${{ steps.apk.outputs.path }}
+            dist/SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: 14
