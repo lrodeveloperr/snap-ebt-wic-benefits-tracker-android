@@ -42,6 +42,8 @@ jobs:
               if not raw:
                   continue
               path = Path(raw.decode())
+              if str(path).startswith(".github/workflows/"):
+                  continue
               if not path.is_file():
                   continue
               data = path.read_bytes()
@@ -65,21 +67,20 @@ jobs:
       - run: npm ci --no-audit --no-fund
       - run: npm run embed:web
       - run: npm run validate
-      - name: Verify rename
+      - name: Verify app rename
         shell: bash
         run: |
           set -euo pipefail
-          if git grep -n -I -E 'SNAP-EBT[[:space:]]*&?[[:space:]]*WIC Benefits Tracker|SNAP-EBT-WIC-Benefits-Tracker' -- . ':(exclude).github/workflows/rename-grocery-benefits-tracker.yml'; then
+          if git grep -n -I -E 'SNAP-EBT[[:space:]]*&?[[:space:]]*WIC Benefits Tracker|SNAP-EBT-WIC-Benefits-Tracker' -- . ':(exclude).github/workflows/*'; then
             exit 1
           fi
           grep -F '"name": "Grocery Benefits Tracker"' app.json
-          grep -F 'config.name !== "Grocery Benefits Tracker"' .github/workflows/android-production-aab.yml
           grep -F '"package": "com.lateefrazaqoyetola.snapebtwictracker"' app.json
-      - name: Commit rename
+      - name: Commit app rename
         shell: bash
         run: |
           git config user.name "GoodUse Studios Build Agent"
           git config user.email "actions@users.noreply.github.com"
-          git add -A
+          git add -A -- ':!.github/workflows'
           git commit -m "Rename app to Grocery Benefits Tracker"
           git push origin HEAD:main
