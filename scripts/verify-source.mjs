@@ -8,7 +8,17 @@ const APPROVED_ICON_SHA256 =
 const TEST_APP_ID = "ca-app-pub-3940256099942544~3347511713";
 const TEST_BANNER_ID = "ca-app-pub-3940256099942544/6300978111";
 const PACKAGE = "com.lateefrazaqoyetola.snapebtwictracker";
-const LEGAL_ORIGIN = "https://lrodeveloperr.github.io/snap-wic-benefits-tracker-legal";
+const LEGAL_ORIGIN = "https://lrodeveloperr.github.io/grocery-benefits-tracker";
+const LEGACY_PUBLIC_MARKERS = Object.freeze([
+  "SNAP-EBT & WIC Benefits Tracker",
+  "SNAP-EBT WIC Benefits Tracker",
+  "SNAP-EBT-WIC-Benefits-Tracker",
+  "https://lrodeveloperr.github.io/snap-wic-benefits-tracker-legal",
+  "snap-ebt-wic-history",
+  "historial-snap-ebt-wic",
+  "USDA/FNS",
+  "fns.usda.gov",
+]);
 
 const read = (path) => readFile(path, "utf8");
 const sha256 = (bytes) => createHash("sha256").update(bytes).digest("hex");
@@ -97,6 +107,26 @@ mustContain(html, "type:'legal-ready',ready:!!state.onboarded&&hasCurrentLegalAc
 for (const path of ["/terms/", "/privacy/", "/support/", "/official-sources/"]) {
   mustContain(html, `${LEGAL_ORIGIN}${path}`, `canonical legal link ${path}`);
 }
+for (const path of [
+  "/es/terminos/",
+  "/es/privacidad/",
+  "/es/soporte/",
+  "/es/fuentes-oficiales/",
+]) {
+  mustContain(html, `${LEGAL_ORIGIN}${path}`, `canonical Spanish legal link ${path}`);
+}
+for (const marker of LEGACY_PUBLIC_MARKERS) {
+  mustNotContain(html, marker, `legacy public marker ${marker}`);
+}
+mustContain(html, "USDA FNA (formerly FNS)", "current USDA administration name");
+assert.equal(
+  messages["en-US"]["history.exportFilename"],
+  "grocery-benefits-tracker-history",
+);
+assert.equal(
+  messages["es-PR"]["history.exportFilename"],
+  "historial-rastreador-beneficios",
+);
 
 mustNotContain(app, TEST_BANNER_ID, "hard-coded Google Android demo banner ID in runtime source");
 mustContain(app, "requestNonPersonalizedAdsOnly: true", "non-personalized ad request");
@@ -213,3 +243,4 @@ mustContain(provenance, "03d1dd013f215938b82ca1601c88301c9d5ed518", "source comm
 mustContain(provenance, "23d938c18df0e185e54946759a3075ef42ce2a6cbc3a0bff99b3a085387e4fcd", "source archive provenance");
 
 console.log("Android source verification passed.");
+
