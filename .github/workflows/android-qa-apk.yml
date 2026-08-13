@@ -117,7 +117,7 @@ jobs:
             throw new Error("Unexpected resolved Android SDK configuration.");
           }
           if (
-            config.name !== "SNAP-EBT & WIC Benefits Tracker QA" ||
+            config.name !== "Grocery Benefits Tracker QA" ||
             config.extra?.buildProfile !== "qa" ||
             JSON.stringify(config.platforms) !== JSON.stringify(["android"])
           ) {
@@ -209,12 +209,12 @@ jobs:
           source_apk="${release_apks[0]}"
 
           mkdir -p dist
-          final_apk="dist/snap-ebt-wic-benefits-tracker-qa.apk"
+          final_apk="dist/grocery-benefits-tracker-qa.apk"
           apksigner="$ANDROID_HOME/build-tools/36.0.0/apksigner"
           aapt="$ANDROID_HOME/build-tools/36.0.0/aapt"
           zipalign="$ANDROID_HOME/build-tools/36.0.0/zipalign"
-          aligned_apk="$RUNNER_TEMP/snap-ebt-wic-benefits-tracker-qa-aligned.apk"
-          qa_keystore="$RUNNER_TEMP/snap-ebt-wic-benefits-tracker-qa.p12"
+          aligned_apk="$RUNNER_TEMP/grocery-benefits-tracker-qa-aligned.apk"
+          qa_keystore="$RUNNER_TEMP/grocery-benefits-tracker-qa.p12"
 
           # Expo prebuild signs its template release with a shared debug key.
           # Always realign and replace that signature for a portable QA handoff.
@@ -229,7 +229,7 @@ jobs:
             -keysize 2048 \
             -sigalg SHA256withRSA \
             -validity 3650 \
-            -dname "CN=SNAP EBT QA,OU=QA,O=Good Use Studios,L=Test,ST=Test,C=US"
+            -dname "CN=Grocery Benefits Tracker QA,OU=QA,O=Good Use Studios,L=Test,ST=Test,C=US"
           certificate_report="$(keytool -list -v \
             -storetype PKCS12 \
             -keystore "$qa_keystore" \
@@ -279,7 +279,7 @@ jobs:
       - name: Upload QA APK
         uses: actions/upload-artifact@v4
         with:
-          name: snap-ebt-wic-benefits-tracker-qa-${{ github.run_number }}
+          name: grocery-benefits-tracker-qa-${{ github.run_number }}
           path: |
             ${{ steps.apk.outputs.path }}
             dist/SHA256SUMS.txt
