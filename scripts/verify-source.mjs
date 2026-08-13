@@ -140,7 +140,7 @@ mustContain(app, "enableVibrate: false", "silent reminder channel");
 mustContain(app, "onRenderProcessGone", "Android WebView recovery");
 mustContain(app, "BackHandler.addEventListener", "Android hardware back handling");
 
-assert.equal(appJson.expo.name, "SNAP-EBT & WIC Benefits Tracker");
+assert.equal(appJson.expo.name, "Grocery Benefits Tracker");
 assert.deepEqual(appJson.expo.platforms, ["android"]);
 assert.equal(appJson.expo.android.package, PACKAGE);
 assert.equal(appJson.expo.android.allowBackup, false);

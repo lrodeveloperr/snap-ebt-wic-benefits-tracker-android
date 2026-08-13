@@ -1,6 +1,6 @@
-# SNAP-EBT & WIC Benefits Tracker for Android
+# Grocery Benefits Tracker for Android
 
-This is the Expo 57 / React Native 0.86.2 Android app for SNAP-EBT & WIC Benefits Tracker. Expo prebuild generates a native Android project around the reviewed application source.
+This is the Expo 57 / React Native 0.86.2 Android app for Grocery Benefits Tracker. Expo prebuild generates a native Android project around the reviewed application source.
 
 The app keeps grocery planning data on the device, supports SNAP/EBT and Puerto Rico PAN terminology, exports reports, displays Google Mobile Ads after consent handling, and supports an optional ad-free entitlement.
 
