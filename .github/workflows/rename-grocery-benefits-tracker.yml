@@ -60,20 +60,7 @@ jobs:
           app_path = Path("app.json")
           app = json.loads(app_path.read_text(encoding="utf-8"))
           app["expo"]["name"] = "Grocery Benefits Tracker"
-          app["expo"]["slug"] = "grocery-benefits-tracker-android"
           app_path.write_text(json.dumps(app, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-
-          pkg_path = Path("package.json")
-          pkg = json.loads(pkg_path.read_text(encoding="utf-8"))
-          pkg["name"] = "grocery-benefits-tracker-android"
-          pkg_path.write_text(json.dumps(pkg, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-
-          lock_path = Path("package-lock.json")
-          lock = json.loads(lock_path.read_text(encoding="utf-8"))
-          lock["name"] = "grocery-benefits-tracker-android"
-          if isinstance(lock.get("packages"), dict) and isinstance(lock["packages"].get(""), dict):
-              lock["packages"][""]["name"] = "grocery-benefits-tracker-android"
-          lock_path.write_text(json.dumps(lock, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
           PY
       - run: npm ci --no-audit --no-fund
       - run: npm run embed:web
@@ -87,6 +74,7 @@ jobs:
           fi
           grep -F '"name": "Grocery Benefits Tracker"' app.json
           grep -F 'config.name !== "Grocery Benefits Tracker"' .github/workflows/android-production-aab.yml
+          grep -F '"package": "com.lateefrazaqoyetola.snapebtwictracker"' app.json
       - name: Commit rename
         shell: bash
         run: |
