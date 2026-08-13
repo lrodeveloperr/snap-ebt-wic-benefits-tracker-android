@@ -13,9 +13,12 @@ const LEGACY_PUBLIC_MARKERS = Object.freeze([
   "SNAP-EBT & WIC Benefits Tracker",
   "SNAP-EBT WIC Benefits Tracker",
   "SNAP-EBT-WIC-Benefits-Tracker",
+  "SNAP-EBT · WIC · Shopping budget",
+  "PAN · WIC · Presupuesto de compra",
   "https://lrodeveloperr.github.io/snap-wic-benefits-tracker-legal",
   "snap-ebt-wic-history",
   "historial-snap-ebt-wic",
+  "snap-ebt-wic-local-recovery.txt",
   "USDA/FNS",
   "fns.usda.gov",
 ]);
@@ -92,6 +95,14 @@ assert.equal(messages["en-US"]["purchase.subtitle"], "One-time Google Play purch
 assert.match(messages["es-PR"]["purchase.subtitle"], /Google Play/);
 assert.doesNotMatch(messages["en-US"]["app.webTitle"], /iOS|iPhone|App Store|Apple Account/);
 assert.doesNotMatch(messages["es-PR"]["app.webTitle"], /iOS|iPhone|App Store|Cuenta de Apple/);
+assert.equal(
+  messages["en-US"]["app.drawerSubtitle"],
+  "Manual tracker · Grocery budget",
+);
+assert.equal(
+  messages["es-PR"]["app.drawerSubtitle"],
+  "Rastreador manual · Presupuesto de compra",
+);
 
 mustContain(html, "const TERMS_VERSION='2026-08-11'", "pinned Terms version");
 mustContain(html, "onboarded:false", "fresh state onboarding gate");
@@ -126,6 +137,11 @@ assert.equal(
 assert.equal(
   messages["es-PR"]["history.exportFilename"],
   "historial-rastreador-beneficios",
+);
+mustContain(
+  html,
+  "grocery-benefits-tracker-local-recovery.txt",
+  "neutral recovery export filename",
 );
 
 mustNotContain(app, TEST_BANNER_ID, "hard-coded Google Android demo banner ID in runtime source");
@@ -243,4 +259,3 @@ mustContain(provenance, "03d1dd013f215938b82ca1601c88301c9d5ed518", "source comm
 mustContain(provenance, "23d938c18df0e185e54946759a3075ef42ce2a6cbc3a0bff99b3a085387e4fcd", "source archive provenance");
 
 console.log("Android source verification passed.");
-
