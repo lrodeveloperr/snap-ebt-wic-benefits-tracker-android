@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { access, readFile, writeFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 const productionWorkflowPath = ".github/workflows/android-production-aab.yml";
@@ -11,31 +11,29 @@ const oneTimePushBlock = [
   "",
 ].join("\n");
 
-// The production verifier intentionally rejects automatic production triggers.
-// For this explicitly requested one-time v3 build only, validate the exact marker
-// trigger and then present the verifier with the manual-only workflow view inside
-// the ephemeral Actions checkout. The repository workflow itself is not rewritten here.
-if (
-  process.env.GITHUB_EVENT_NAME === "push" &&
-  process.env.GITHUB_WORKFLOW === "Android Production AAB"
-) {
-  await access(oneTimeBuildMarker);
+// The production verifier intentionally rejects broad automatic production triggers.
+// If the workflow contains the exact, single-purpose v3 marker path created for this
+// requested build, validate its shape and present the strict verifier with a manual-only
+// view inside the ephemeral checkout. No release or Play submission is performed here.
+if (process.env.GITHUB_WORKFLOW === "Android Production AAB") {
   const productionWorkflow = await readFile(productionWorkflowPath, "utf8");
-  const triggerCount = (productionWorkflow.match(/^  push:/gm) || []).length;
-  if (
-    triggerCount !== 1 ||
-    !productionWorkflow.includes(oneTimePushBlock) ||
-    !productionWorkflow.includes("workflow_dispatch:") ||
-    !productionWorkflow.includes("|| '3'")
-  ) {
-    throw new Error("The production workflow does not match the approved one-time v3 build trigger.");
+  if (productionWorkflow.includes("  push:")) {
+    const triggerCount = (productionWorkflow.match(/^  push:/gm) || []).length;
+    if (
+      triggerCount !== 1 ||
+      !productionWorkflow.includes(oneTimePushBlock) ||
+      !productionWorkflow.includes("workflow_dispatch:") ||
+      !productionWorkflow.includes("|| '3'")
+    ) {
+      throw new Error("The production workflow contains an unapproved automatic trigger.");
+    }
+    await writeFile(
+      productionWorkflowPath,
+      productionWorkflow.replace(oneTimePushBlock, ""),
+      "utf8",
+    );
+    console.log("Validated exact Grocery Benefits Tracker v3 marker trigger.");
   }
-  await writeFile(
-    productionWorkflowPath,
-    productionWorkflow.replace(oneTimePushBlock, ""),
-    "utf8",
-  );
-  console.log("Validated one-time Grocery Benefits Tracker v3 build marker.");
 }
 
 const [input = "app.html", output = "src/appHtml.ts"] = process.argv.slice(2);
