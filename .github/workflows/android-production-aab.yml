@@ -8,6 +8,9 @@ on:
         required: true
         default: "1"
         type: string
+  push:
+    paths:
+      - .github/BUILD_GROCERY_BENEFITS_V3
 
 permissions:
   contents: read
@@ -29,7 +32,7 @@ jobs:
       EXPO_PUBLIC_ANDROID_ADMOB_APP_ID: ca-app-pub-8054612600809568~2189058911
       EXPO_PUBLIC_ANDROID_ADMOB_BANNER_ID: ca-app-pub-8054612600809568/5751919465
       EXPO_PUBLIC_ADMOB_PUBLISHER_ID: "8054612600809568"
-      ANDROID_VERSION_CODE: ${{ inputs.version_code }}
+      ANDROID_VERSION_CODE: ${{ github.event_name == 'workflow_dispatch' && inputs.version_code || '3' }}
       PRODUCTION_PACKAGE: com.lateefrazaqoyetola.snapebtwictracker
 
     steps:
@@ -118,7 +121,7 @@ jobs:
             throw new Error(`Unexpected versionCode: ${config.android.versionCode}`);
           }
           if (
-            config.name !== "SNAP-EBT & WIC Benefits Tracker" ||
+            config.name !== "Grocery Benefits Tracker" ||
             config.extra?.buildProfile !== "production" ||
             JSON.stringify(config.platforms) !== JSON.stringify(["android"])
           ) {
@@ -241,7 +244,7 @@ jobs:
           }
 
           mkdir -p dist
-          final_aab="dist/SNAP-EBT-WIC-Benefits-Tracker-1.0.0-${ANDROID_VERSION_CODE}.aab"
+          final_aab="dist/Grocery-Benefits-Tracker-1.0.0-${ANDROID_VERSION_CODE}.aab"
           jarsigner \
             -keystore "$keystore" -storetype PKCS12 \
             -storepass:env KEYSTORE_PASSWORD -keypass:env KEY_PASSWORD \
@@ -295,7 +298,7 @@ jobs:
       - name: Upload production AAB
         uses: actions/upload-artifact@v4
         with:
-          name: SNAP-EBT-WIC-production-AAB-v${{ inputs.version_code }}
+          name: Grocery-Benefits-Tracker-production-AAB-v${{ env.ANDROID_VERSION_CODE }}
           path: |
             dist/*.aab
             dist/SHA256SUMS.txt
