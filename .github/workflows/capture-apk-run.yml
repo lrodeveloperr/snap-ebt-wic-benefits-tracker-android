@@ -58,3 +58,5 @@ jobs:
           git add .github/last-apk-run.json
           git commit -m "Record Grocery QA APK run ${{ steps.run.outputs.run_id }}"
           git push origin HEAD:main
+
+# Explicit retrigger marker: 2026-08-29
