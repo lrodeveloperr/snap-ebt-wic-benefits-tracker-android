@@ -107,9 +107,17 @@ assert.equal(
 mustContain(html, "const TERMS_VERSION='2026-08-11'", "pinned Terms version");
 mustContain(html, "onboarded:false", "fresh state onboarding gate");
 mustContain(html, "legalAcceptance:null", "fresh state legal acceptance");
-mustContain(html, "seq=['legal','program']", "legal-first onboarding sequence");
-mustContain(html, "id=\"onAgeConfirmed\"", "adult confirmation checkbox");
-mustContain(html, "id=\"onTermsAccepted\"", "Terms and Privacy checkbox");
+mustContain(
+  html,
+  "function onboardingSequence(){return ['legal','program'];}",
+  "idiot-test onboarding sequence",
+);
+mustContain(html, "id=\"onLegalCombined\"", "combined legal confirmation checkbox");
+mustContain(
+  html,
+  "onboardingDraft.ageConfirmed=combined.checked;onboardingDraft.termsAccepted=combined.checked",
+  "combined adult, Terms, and Privacy confirmation",
+);
 mustContain(html, "privacyAcknowledged:true", "Privacy acknowledgment record");
 mustContain(html, "if(!state.onboarded){", "onboarding route guard");
 mustContain(html, "if(!hasCurrentLegalAcceptance(state)){", "Terms route guard");
