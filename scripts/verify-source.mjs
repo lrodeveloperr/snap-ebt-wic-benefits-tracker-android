@@ -8,7 +8,20 @@ const APPROVED_ICON_SHA256 =
 const TEST_APP_ID = "ca-app-pub-3940256099942544~3347511713";
 const TEST_BANNER_ID = "ca-app-pub-3940256099942544/6300978111";
 const PACKAGE = "com.lateefrazaqoyetola.snapebtwictracker";
-const LEGAL_ORIGIN = "https://lrodeveloperr.github.io/snap-wic-benefits-tracker-legal";
+const LEGAL_ORIGIN = "https://lrodeveloperr.github.io/grocery-benefits-tracker";
+const LEGACY_PUBLIC_MARKERS = Object.freeze([
+  "SNAP-EBT & WIC Benefits Tracker",
+  "SNAP-EBT WIC Benefits Tracker",
+  "SNAP-EBT-WIC-Benefits-Tracker",
+  "SNAP-EBT · WIC · Shopping budget",
+  "PAN · WIC · Presupuesto de compra",
+  "https://lrodeveloperr.github.io/snap-wic-benefits-tracker-legal",
+  "snap-ebt-wic-history",
+  "historial-snap-ebt-wic",
+  "snap-ebt-wic-local-recovery.txt",
+  "USDA/FNS",
+  "fns.usda.gov",
+]);
 
 const read = (path) => readFile(path, "utf8");
 const sha256 = (bytes) => createHash("sha256").update(bytes).digest("hex");
@@ -82,6 +95,14 @@ assert.equal(messages["en-US"]["purchase.subtitle"], "One-time Google Play purch
 assert.match(messages["es-PR"]["purchase.subtitle"], /Google Play/);
 assert.doesNotMatch(messages["en-US"]["app.webTitle"], /iOS|iPhone|App Store|Apple Account/);
 assert.doesNotMatch(messages["es-PR"]["app.webTitle"], /iOS|iPhone|App Store|Cuenta de Apple/);
+assert.equal(
+  messages["en-US"]["app.drawerSubtitle"],
+  "Manual tracker · Grocery budget",
+);
+assert.equal(
+  messages["es-PR"]["app.drawerSubtitle"],
+  "Rastreador manual · Presupuesto de compra",
+);
 
 mustContain(html, "const TERMS_VERSION='2026-08-11'", "pinned Terms version");
 mustContain(html, "onboarded:false", "fresh state onboarding gate");
@@ -97,6 +118,31 @@ mustContain(html, "type:'legal-ready',ready:!!state.onboarded&&hasCurrentLegalAc
 for (const path of ["/terms/", "/privacy/", "/support/", "/official-sources/"]) {
   mustContain(html, `${LEGAL_ORIGIN}${path}`, `canonical legal link ${path}`);
 }
+for (const path of [
+  "/es/terminos/",
+  "/es/privacidad/",
+  "/es/soporte/",
+  "/es/fuentes-oficiales/",
+]) {
+  mustContain(html, `${LEGAL_ORIGIN}${path}`, `canonical Spanish legal link ${path}`);
+}
+for (const marker of LEGACY_PUBLIC_MARKERS) {
+  mustNotContain(html, marker, `legacy public marker ${marker}`);
+}
+mustContain(html, "USDA FNA (formerly FNS)", "current USDA administration name");
+assert.equal(
+  messages["en-US"]["history.exportFilename"],
+  "grocery-benefits-tracker-history",
+);
+assert.equal(
+  messages["es-PR"]["history.exportFilename"],
+  "historial-rastreador-beneficios",
+);
+mustContain(
+  html,
+  "grocery-benefits-tracker-local-recovery.txt",
+  "neutral recovery export filename",
+);
 
 mustNotContain(app, TEST_BANNER_ID, "hard-coded Google Android demo banner ID in runtime source");
 mustContain(app, "requestNonPersonalizedAdsOnly: true", "non-personalized ad request");
