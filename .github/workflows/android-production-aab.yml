@@ -8,10 +8,6 @@ on:
         required: true
         default: "1"
         type: string
-  push:
-    paths:
-      - .github/BUILD_GROCERY_BENEFITS_V3
-
 permissions:
   contents: read
 
