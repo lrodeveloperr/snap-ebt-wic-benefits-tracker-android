@@ -24,11 +24,11 @@ assert.match(manifest, /android:allowBackup="false"/);
 assert.match(manifest, /android\.permission\.INTERNET/);
 assert.match(manifest, /android\.permission\.ACCESS_NETWORK_STATE/);
 assert.match(manifest, /android\.permission\.POST_NOTIFICATIONS/);
+assert.match(manifest, /<uses-permission[^>]+android:name=["']android\.permission\.CAMERA["'][^>]*\/>/);
 assert.match(manifest, /com\.android\.vending\.BILLING/);
 assert.match(manifest, new RegExp(TEST_APP_ID.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
 
 for (const permission of [
-  "CAMERA",
   "RECORD_AUDIO",
   "ACCESS_FINE_LOCATION",
   "ACCESS_COARSE_LOCATION",

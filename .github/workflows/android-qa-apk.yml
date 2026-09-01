@@ -126,6 +126,12 @@ jobs:
           if (!config.android.permissions.includes("android.permission.POST_NOTIFICATIONS")) {
             throw new Error("Android reminder notification permission is missing.");
           }
+          if (!config.android.permissions.includes("android.permission.CAMERA")) {
+            throw new Error("Android barcode camera permission is missing.");
+          }
+          if (config.android.blockedPermissions.includes("android.permission.CAMERA")) {
+            throw new Error("Android barcode camera permission is blocked.");
+          }
           const ads = config.plugins.find(
             (plugin) => Array.isArray(plugin) && plugin[0] === "react-native-google-mobile-ads",
           );

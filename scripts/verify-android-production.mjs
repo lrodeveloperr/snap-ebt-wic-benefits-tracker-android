@@ -36,13 +36,13 @@ assert.match(manifest, /android:allowBackup="false"/);
 assert.match(manifest, /android\.permission\.INTERNET/);
 assert.match(manifest, /android\.permission\.ACCESS_NETWORK_STATE/);
 assert.match(manifest, /android\.permission\.POST_NOTIFICATIONS/);
+assert.match(manifest, /<uses-permission[^>]+android:name=["']android\.permission\.CAMERA["'][^>]*\/>/);
 assert.match(manifest, /com\.android\.vending\.BILLING/);
 assert.ok(manifest.includes(LIVE_APP_ID), "live AdMob app ID is missing from the manifest");
 assert.ok(!manifest.includes(GOOGLE_DEMO_APP_ID), "Google demo AdMob app ID reached production");
 assert.ok(!nativeSource.includes(`${PRODUCTION_PACKAGE}.qa`), "QA package reached production");
 
 for (const permission of [
-  "CAMERA",
   "RECORD_AUDIO",
   "ACCESS_FINE_LOCATION",
   "ACCESS_COARSE_LOCATION",
@@ -88,4 +88,3 @@ if (bundleArgument) {
 console.log(
   `Android production verification passed${bundleArgument ? " (including AAB)" : ""}.`,
 );
-

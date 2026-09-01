@@ -42,6 +42,7 @@ const [
   qaWorkflow,
   installProof,
   productionWorkflow,
+  qaVerifier,
   productionVerifier,
 ] =
   await Promise.all([
@@ -56,6 +57,7 @@ const [
     read(".github/workflows/android-qa-apk.yml"),
     read("scripts/prove-android-install.sh"),
     read(".github/workflows/android-production-aab.yml"),
+    read("scripts/verify-android.mjs"),
     read("scripts/verify-android-production.mjs"),
   ]);
 const appJson = JSON.parse(appJsonText);
@@ -193,14 +195,20 @@ mustContain(app, "requestPermissionsAsync", "Android notification permission req
 mustContain(app, "enableVibrate: false", "silent reminder channel");
 mustContain(app, "onRenderProcessGone", "Android WebView recovery");
 mustContain(app, "BackHandler.addEventListener", "Android hardware back handling");
+mustContain(app, 'case "open-barcode-scanner"', "native barcode bridge handler");
+mustContain(app, "<CameraView", "native barcode camera view");
+mustContain(app, "GBTBarcodeScanner?.${result}", "barcode result callback");
 
 assert.equal(appJson.expo.name, "Grocery Benefits Tracker");
 assert.deepEqual(appJson.expo.platforms, ["android"]);
 assert.equal(appJson.expo.android.package, PACKAGE);
 assert.equal(appJson.expo.android.allowBackup, false);
 assert.ok(appJson.expo.android.permissions.includes("android.permission.POST_NOTIFICATIONS"));
+assert.ok(appJson.expo.android.permissions.includes("android.permission.CAMERA"));
+assert.ok(!appJson.expo.android.blockedPermissions.includes("android.permission.CAMERA"));
 assert.ok(appJson.expo.android.blockedPermissions.includes("android.permission.VIBRATE"));
 assert.equal(packageJson.name, "snap-ebt-wic-benefits-tracker-android");
+assert.match(packageJson.dependencies["expo-camera"], /^~57\.0\./);
 assert.equal(packageJson.dependencies["react-native-google-mobile-ads"], "16.3.4");
 assert.equal(installedAdsPackage.version, "16.3.4");
 assert.equal(installedAdsPackage.sdkVersions.android.googleMobileAds, "25.0.0");
@@ -246,6 +254,10 @@ mustContain(productionWorkflow, "Upload production AAB", "production artifact ha
 mustContain(productionVerifier, PACKAGE, "production verifier package");
 mustContain(productionVerifier, "ca-app-pub-8054612600809568~2189058911", "production verifier app ID");
 mustContain(productionVerifier, "ca-app-pub-8054612600809568/5751919465", "production verifier banner ID");
+for (const [name, verifier] of [["QA", qaVerifier], ["production", productionVerifier]]) {
+  mustContain(verifier, "android\\.permission\\.CAMERA", `${name} verifier requires barcode camera`);
+  mustNotContain(verifier, '\n  "CAMERA",', `${name} verifier must not forbid barcode camera`);
+}
 
 for (const path of ["assets/icon.png", "assets/brand-logo-ui.png", "assets/splash-icon.png"]) {
   const bytes = await readFile(path);

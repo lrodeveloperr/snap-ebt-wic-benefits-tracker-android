@@ -1,15 +1,24 @@
 import { Directory, File, Paths } from "expo-file-system";
+import {
+  CameraView,
+  useCameraPermissions,
+  type BarcodeScanningResult,
+  type BarcodeType,
+} from "expo-camera";
 import * as Notifications from "expo-notifications";
 import * as Sharing from "expo-sharing";
 import { StatusBar } from "expo-status-bar";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
+  ActivityIndicator,
   AppState,
   BackHandler,
   Linking,
+  Pressable,
   Share,
   StyleSheet,
+  Text,
   View,
 } from "react-native";
 import mobileAds, {
@@ -348,6 +357,20 @@ type NativeReminderSpec = {
   locale: ReminderLocale;
 };
 
+type BarcodeScannerRequest = {
+  barcodeTypes: BarcodeType[];
+  locale: "en-US" | "es-PR";
+  permissionGranted: boolean;
+};
+
+const GROCERY_BARCODE_TYPES = [
+  "ean13",
+  "ean8",
+  "upc_a",
+  "upc_e",
+] as const satisfies readonly BarcodeType[];
+const GROCERY_BARCODE_TYPE_SET = new Set<BarcodeType>(GROCERY_BARCODE_TYPES);
+
 type WebViewHandle = {
   injectJavaScript: (script: string) => void;
 };
@@ -359,7 +382,7 @@ const NativeWebView = PackageWebView as unknown as React.ForwardRefExoticCompone
 type BridgeMessage =
   | { type: "bridge-ready" }
   | { type: "android-back-result"; handled?: boolean }
-  | { type: "legal-ready"; ready: boolean }
+  | { type: "legal-ready"; ready: boolean; locale?: string }
   | { type: "ad-eligibility"; eligible: boolean }
   | {
       type: "ad-presentation";
@@ -385,7 +408,83 @@ type BridgeMessage =
       requestPermission?: boolean;
       reminders?: unknown;
     }
-  | { type: "clear-app-data"; requestId?: string };
+  | { type: "clear-app-data"; requestId?: string }
+  | {
+      type: "open-barcode-scanner";
+      locale?: string;
+      formats?: unknown;
+    };
+
+const NATIVE_COPY = {
+  "en-US": {
+    exportUnavailableTitle: "Export unavailable",
+    exportUnavailableBody:
+      "The file could not be opened in the Android share sheet. Please try again.",
+    advertisingUnavailableTitle: "Advertising unavailable",
+    advertisingUnavailableBody:
+      "Advertising could not be initialized. Please try again later.",
+    privacyChoicesTitle: "Advertising privacy choices",
+    privacyChoicesBody:
+      "No additional advertising privacy form is required on this device right now.",
+    linkUnavailableTitle: "Link unavailable",
+    linkUnavailableBody: "This secure web page could not be opened.",
+    cameraPermissionTitle: "Camera permission",
+    cameraPermissionBody:
+      "Allow camera access to scan barcodes. You can also enter the item manually.",
+    notNow: "Not now",
+    settings: "Settings",
+    cameraUnavailableTitle: "Camera unavailable",
+    cameraOpenFailedBody:
+      "The camera could not be opened. Enter the item manually instead.",
+    scannerStartFailedBody:
+      "The scanner could not start. Enter the item manually instead.",
+    scannerPreparing: "Preparing camera…",
+    scannerCancelA11y: "Cancel scanning",
+    scannerCancel: "Cancel",
+    scannerTitle: "Scan barcode",
+    scannerTargetA11y: "Place the barcode inside the frame",
+    scannerHint: "Place the UPC or EAN barcode inside the frame",
+  },
+  "es-PR": {
+    exportUnavailableTitle: "Exportación no disponible",
+    exportUnavailableBody:
+      "No se pudo abrir el archivo en la hoja para compartir de Android. Intenta de nuevo.",
+    advertisingUnavailableTitle: "Publicidad no disponible",
+    advertisingUnavailableBody:
+      "No se pudo iniciar la publicidad. Intenta de nuevo más tarde.",
+    privacyChoicesTitle: "Opciones de privacidad de publicidad",
+    privacyChoicesBody:
+      "Este dispositivo no necesita otro formulario de privacidad de publicidad en este momento.",
+    linkUnavailableTitle: "Enlace no disponible",
+    linkUnavailableBody: "No se pudo abrir esta página web segura.",
+    cameraPermissionTitle: "Permiso de cámara",
+    cameraPermissionBody:
+      "Permite el acceso a la cámara para escanear códigos de barras. También puedes escribir el artículo manualmente.",
+    notNow: "Ahora no",
+    settings: "Configuración",
+    cameraUnavailableTitle: "Cámara no disponible",
+    cameraOpenFailedBody:
+      "No se pudo abrir la cámara. Escribe el artículo manualmente.",
+    scannerStartFailedBody:
+      "No se pudo iniciar el escáner. Escribe el artículo manualmente.",
+    scannerPreparing: "Preparando la cámara…",
+    scannerCancelA11y: "Cancelar escaneo",
+    scannerCancel: "Cancelar",
+    scannerTitle: "Escanear código de barras",
+    scannerTargetA11y: "Coloca el código de barras dentro del marco",
+    scannerHint: "Coloca el código UPC o EAN dentro del marco",
+  },
+} as const;
+
+function requestedGroceryBarcodeTypes(formats: unknown): BarcodeType[] {
+  if (!Array.isArray(formats)) return [...GROCERY_BARCODE_TYPES];
+  const requested = formats.filter(
+    (format): format is BarcodeType =>
+      typeof format === "string" &&
+      GROCERY_BARCODE_TYPE_SET.has(format as BarcodeType),
+  );
+  return requested.length ? [...new Set(requested)] : [...GROCERY_BARCODE_TYPES];
+}
 
 function waitFor(milliseconds: number) {
   return new Promise<void>((resolve) => setTimeout(resolve, milliseconds));
@@ -735,6 +834,12 @@ const ANDROID_BACK_SCRIPT = String.raw`
         handled = true;
       }
     } else {
+      if (typeof window.GBTAndroidBack === "function") {
+        handled = window.GBTAndroidBack() === true;
+      }
+      if (handled) {
+        // The web application owns its route stack.
+      } else {
       let currentRoute = "";
       try {
         if (typeof state === "object") currentRoute = String(state.route || "home");
@@ -748,6 +853,7 @@ const ANDROID_BACK_SCRIPT = String.raw`
         if (typeof setRoute === "function") setRoute("home");
         else document.querySelector('[data-route="home"]')?.click();
         handled = true;
+      }
       }
     }
   } catch (_) {}
@@ -1014,6 +1120,8 @@ function fileUti(name: string, mimeType?: string) {
 export default function App() {
   const webViewRef = useRef<WebViewHandle>(null);
   const androidBackRequestAtRef = useRef(0);
+  const barcodeScannerOpenRef = useRef(false);
+  const barcodeResultConsumedRef = useRef(false);
   const adsInitializationRef = useRef<Promise<boolean> | null>(null);
   const previousWebAdStateRef = useRef("AD_LOADING");
   const removeAdsEntitlementRef =
@@ -1027,6 +1135,10 @@ export default function App() {
   const removeAdsReconcileQueueRef = useRef<Promise<void>>(Promise.resolve());
   const [webReady, setWebReady] = useState(false);
   const [webViewInstance, setWebViewInstance] = useState(0);
+  const [cameraPermission, requestCameraPermission] = useCameraPermissions();
+  const [barcodeScannerRequest, setBarcodeScannerRequest] =
+    useState<BarcodeScannerRequest | null>(null);
+  const [appLocale, setAppLocale] = useState<keyof typeof NATIVE_COPY>("en-US");
   const [legalReady, setLegalReady] = useState(false);
   const [privacyChoicesRequired, setPrivacyChoicesRequired] = useState(false);
   const [removeAdsEntitlement, setRemoveAdsEntitlement] =
@@ -1046,6 +1158,7 @@ export default function App() {
   const [webAdState, setWebAdState] = useState("AD_LOADING");
   const [adLoadAttempt, setAdLoadAttempt] = useState(0);
   const [bannerInstance, setBannerInstance] = useState(0);
+  const nativeCopy = NATIVE_COPY[appLocale];
 
   const productionBannerId =
     process.env.EXPO_PUBLIC_ANDROID_ADMOB_BANNER_ID?.trim() || "";
@@ -1731,8 +1844,8 @@ export default function App() {
         failure.message,
       );
       Alert.alert(
-        "Export unavailable",
-        "The file could not be opened in the Android share sheet. Please try again.",
+        nativeCopy.exportUnavailableTitle,
+        nativeCopy.exportUnavailableBody,
       );
     } finally {
       setTimeout(() => {
@@ -1741,7 +1854,7 @@ export default function App() {
         } catch {}
       }, 15000);
     }
-  }, [completeNativeFileShare]);
+  }, [completeNativeFileShare, nativeCopy]);
 
   const completeNativeNotificationReconcile = useCallback(
     (
@@ -1971,8 +2084,8 @@ export default function App() {
         if (removeAdsEntitlementRef.current === "not-entitled") {
           setConsentState("blocked");
           Alert.alert(
-            "Advertising unavailable",
-            "Advertising could not be initialized. Please try again later.",
+            nativeCopy.advertisingUnavailableTitle,
+            nativeCopy.advertisingUnavailableBody,
           );
         } else {
           setConsentState("permitted");
@@ -1981,11 +2094,11 @@ export default function App() {
     } catch {
       setConsentState("blocked");
       Alert.alert(
-        "Advertising privacy choices",
-        "No additional advertising privacy form is required on this device right now.",
+        nativeCopy.privacyChoicesTitle,
+        nativeCopy.privacyChoicesBody,
       );
     }
-  }, [productionAdsConfigured, startAdsIfAllowed]);
+  }, [nativeCopy, productionAdsConfigured, startAdsIfAllowed]);
 
   const beginRemoveAdsPurchase = useCallback(async () => {
     if (removeAdsEntitlementRef.current === "entitled") {
@@ -2067,6 +2180,108 @@ export default function App() {
     setRemoveAdsOperationState,
   ]);
 
+  const finishBarcodeScanner = useCallback(
+    (result: "complete" | "cancel", value?: string) => {
+      if (
+        !barcodeScannerOpenRef.current ||
+        barcodeResultConsumedRef.current
+      ) {
+        return;
+      }
+      barcodeResultConsumedRef.current = true;
+      barcodeScannerOpenRef.current = false;
+      setBarcodeScannerRequest(null);
+      const argument = result === "complete" ? JSON.stringify(value || "") : "";
+      webViewRef.current?.injectJavaScript(`
+        window.GBTBarcodeScanner?.${result}(${argument});
+        true;
+      `);
+    },
+    [],
+  );
+
+  const cancelBarcodeScanner = useCallback(() => {
+    finishBarcodeScanner("cancel");
+  }, [finishBarcodeScanner]);
+
+  const openBarcodeScanner = useCallback(
+    async (message: Extract<BridgeMessage, { type: "open-barcode-scanner" }>) => {
+      if (barcodeScannerOpenRef.current) return;
+      barcodeScannerOpenRef.current = true;
+      barcodeResultConsumedRef.current = false;
+      const locale = message.locale === "es-PR" ? "es-PR" : "en-US";
+      const copy = NATIVE_COPY[locale];
+      const barcodeTypes = requestedGroceryBarcodeTypes(message.formats);
+      setBarcodeScannerRequest({
+        barcodeTypes,
+        locale,
+        permissionGranted: cameraPermission?.granted === true,
+      });
+
+      try {
+        const permission = cameraPermission?.granted
+          ? cameraPermission
+          : await requestCameraPermission();
+        if (!barcodeScannerOpenRef.current) return;
+        if (!permission.granted) {
+          cancelBarcodeScanner();
+          Alert.alert(copy.cameraPermissionTitle, copy.cameraPermissionBody, [
+            {
+              text: copy.notNow,
+              style: "cancel",
+            },
+            {
+              text: copy.settings,
+              onPress: () => void Linking.openSettings(),
+            },
+          ]);
+          return;
+        }
+        setBarcodeScannerRequest((current) =>
+          current ? { ...current, permissionGranted: true } : current,
+        );
+      } catch (error) {
+        console.error("Camera permission request failed", error);
+        cancelBarcodeScanner();
+        Alert.alert(
+          copy.cameraUnavailableTitle,
+          copy.cameraOpenFailedBody,
+        );
+      }
+    },
+    [cameraPermission, cancelBarcodeScanner, requestCameraPermission],
+  );
+
+  const handleBarcodeScanned = useCallback(
+    (result: BarcodeScanningResult) => {
+      if (
+        !barcodeScannerOpenRef.current ||
+        barcodeResultConsumedRef.current
+      ) {
+        return;
+      }
+      const value = String(result.data || "").trim();
+      if (!/^\d{8}$|^\d{12,14}$/.test(value)) return;
+      finishBarcodeScanner("complete", value);
+    },
+    [finishBarcodeScanner],
+  );
+
+  const handleBarcodeCameraError = useCallback(
+    (error: { message: string }) => {
+      if (!barcodeScannerOpenRef.current) return;
+      const locale = barcodeScannerRequest?.locale || "en-US";
+      const copy = NATIVE_COPY[locale];
+      console.error("Barcode camera failed to mount", error.message);
+      cancelBarcodeScanner();
+      Alert.alert(
+        copy.cameraUnavailableTitle,
+        copy.scannerStartFailedBody,
+      );
+    },
+    [barcodeScannerRequest?.locale, cancelBarcodeScanner],
+  );
+
   const onMessage = useCallback(
     (event: WebViewMessageEvent) => {
       let message: BridgeMessage;
@@ -2089,6 +2304,9 @@ export default function App() {
           break;
         case "legal-ready":
           setLegalReady(Boolean(message.ready));
+          if (message.locale === "en-US" || message.locale === "es-PR") {
+            setAppLocale(message.locale);
+          }
           break;
         case "ad-eligibility":
           setAdEligible(Boolean(message.eligible));
@@ -2117,15 +2335,22 @@ export default function App() {
         case "clear-app-data":
           void clearNativeAppData(message);
           break;
+        case "open-barcode-scanner":
+          void openBarcodeScanner(message);
+          break;
       }
     },
-    [beginRemoveAdsPurchase, beginRemoveAdsRestore, clearNativeAppData, legalReady, privacyChoicesRequired, reconcileNotifications, shareFile, shareText, showPrivacyChoices],
+    [beginRemoveAdsPurchase, beginRemoveAdsRestore, clearNativeAppData, legalReady, openBarcodeScanner, privacyChoicesRequired, reconcileNotifications, shareFile, shareText, showPrivacyChoices],
   );
 
   useEffect(() => {
     const subscription = BackHandler.addEventListener(
       "hardwareBackPress",
       () => {
+        if (barcodeScannerOpenRef.current) {
+          cancelBarcodeScanner();
+          return true;
+        }
         if (!webReady || !webViewRef.current) return false;
         if (Date.now() - androidBackRequestAtRef.current < 1500) return true;
         androidBackRequestAtRef.current = Date.now();
@@ -2134,7 +2359,7 @@ export default function App() {
       },
     );
     return () => subscription.remove();
-  }, [webReady]);
+  }, [cancelBarcodeScanner, webReady]);
 
   const recoverFromRenderProcessLoss = useCallback(
     (event: WebViewRenderProcessGoneEvent) => {
@@ -2156,9 +2381,9 @@ export default function App() {
   const openExternalUrl = useCallback((url: string) => {
     if (!/^https:\/\//i.test(url)) return;
     void Linking.openURL(url).catch(() => {
-      Alert.alert("Link unavailable", "This secure web page could not be opened.");
+      Alert.alert(nativeCopy.linkUnavailableTitle, nativeCopy.linkUnavailableBody);
     });
-  }, []);
+  }, [nativeCopy]);
 
   const shouldStartNavigation = useCallback(
     (request: ShouldStartLoadRequest) => {
@@ -2192,12 +2417,18 @@ export default function App() {
     bannerMounted &&
     nativeAdState === "loaded" &&
     webAdState === "AD_LOADED";
+  const scannerCopy =
+    NATIVE_COPY[barcodeScannerRequest?.locale === "es-PR" ? "es-PR" : "en-US"];
 
   return (
     <SafeAreaProvider style={styles.root}>
-      <StatusBar style="dark" />
+      <StatusBar style={barcodeScannerRequest ? "light" : "dark"} />
       <SafeAreaView style={styles.safeArea} edges={["top", "bottom"]}>
         <NativeWebView
+          accessibilityElementsHidden={Boolean(barcodeScannerRequest)}
+          importantForAccessibility={
+            barcodeScannerRequest ? "no-hide-descendants" : "auto"
+          }
           key={`webview-${webViewInstance}`}
           ref={webViewRef}
           source={source}
@@ -2255,6 +2486,63 @@ export default function App() {
         {testAds ? (
           <View accessibilityElementsHidden style={styles.testMarker} />
         ) : null}
+        {barcodeScannerRequest ? (
+          <View
+            accessibilityViewIsModal
+            importantForAccessibility="yes"
+            style={styles.scannerOverlay}
+          >
+            {barcodeScannerRequest.permissionGranted ? (
+              <CameraView
+                accessible={false}
+                barcodeScannerSettings={{
+                  barcodeTypes: barcodeScannerRequest.barcodeTypes,
+                }}
+                facing="back"
+                onBarcodeScanned={handleBarcodeScanned}
+                onMountError={handleBarcodeCameraError}
+                style={styles.scannerCamera}
+              />
+            ) : (
+              <View style={styles.scannerLoading}>
+                <ActivityIndicator color="#ffffff" size="large" />
+                <Text style={styles.scannerLoadingText}>
+                  {scannerCopy.scannerPreparing}
+                </Text>
+              </View>
+            )}
+            <View pointerEvents="box-none" style={styles.scannerChrome}>
+              <View style={styles.scannerHeader}>
+                <Pressable
+                  accessibilityLabel={scannerCopy.scannerCancelA11y}
+                  accessibilityRole="button"
+                  onPress={cancelBarcodeScanner}
+                  style={({ pressed }) => [
+                    styles.scannerCancel,
+                    pressed && styles.scannerCancelPressed,
+                  ]}
+                >
+                  <Text style={styles.scannerCancelText}>
+                    {scannerCopy.scannerCancel}
+                  </Text>
+                </Pressable>
+                <Text accessibilityRole="header" style={styles.scannerTitle}>
+                  {scannerCopy.scannerTitle}
+                </Text>
+                <View style={styles.scannerHeaderSpacer} />
+              </View>
+              <View
+                accessible
+                accessibilityRole="image"
+                accessibilityLabel={scannerCopy.scannerTargetA11y}
+                style={styles.scannerTarget}
+              />
+              <Text style={styles.scannerHint}>
+                {scannerCopy.scannerHint}
+              </Text>
+            </View>
+          </View>
+        ) : null}
       </SafeAreaView>
     </SafeAreaProvider>
   );
@@ -2292,5 +2580,102 @@ const styles = StyleSheet.create({
     width: 1,
     height: 1,
     opacity: 0,
+  },
+  scannerOverlay: {
+    position: "absolute",
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
+    zIndex: 100,
+    backgroundColor: "#111111",
+  },
+  scannerCamera: {
+    position: "absolute",
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
+  },
+  scannerLoading: {
+    position: "absolute",
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 12,
+    backgroundColor: "#111111",
+  },
+  scannerLoadingText: {
+    color: "#ffffff",
+    fontSize: 16,
+    fontWeight: "600",
+  },
+  scannerChrome: {
+    position: "absolute",
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
+    alignItems: "center",
+    backgroundColor: "rgba(0, 0, 0, 0.22)",
+  },
+  scannerHeader: {
+    width: "100%",
+    height: 64,
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 12,
+    backgroundColor: "rgba(0, 0, 0, 0.66)",
+  },
+  scannerCancel: {
+    minWidth: 80,
+    minHeight: 44,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 22,
+  },
+  scannerCancelPressed: {
+    backgroundColor: "rgba(255, 255, 255, 0.18)",
+  },
+  scannerCancelText: {
+    color: "#ffffff",
+    fontSize: 16,
+    fontWeight: "600",
+  },
+  scannerTitle: {
+    flex: 1,
+    color: "#ffffff",
+    fontSize: 18,
+    fontWeight: "700",
+    textAlign: "center",
+  },
+  scannerHeaderSpacer: {
+    width: 80,
+  },
+  scannerTarget: {
+    width: "82%",
+    maxWidth: 460,
+    height: 190,
+    marginTop: "42%",
+    borderWidth: 3,
+    borderColor: "#ffffff",
+    borderRadius: 18,
+    backgroundColor: "rgba(255, 255, 255, 0.03)",
+  },
+  scannerHint: {
+    maxWidth: 360,
+    marginTop: 24,
+    paddingHorizontal: 18,
+    paddingVertical: 12,
+    overflow: "hidden",
+    borderRadius: 12,
+    color: "#ffffff",
+    backgroundColor: "rgba(0, 0, 0, 0.72)",
+    fontSize: 16,
+    fontWeight: "600",
+    textAlign: "center",
   },
 });
