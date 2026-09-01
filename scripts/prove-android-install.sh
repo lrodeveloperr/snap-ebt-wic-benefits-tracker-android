@@ -2,7 +2,7 @@
 set -euo pipefail
 
 readonly package_name="com.lateefrazaqoyetola.snapebtwictracker.qa"
-readonly apk_path="dist/snap-ebt-wic-benefits-tracker-qa.apk"
+readonly apk_path="dist/grocery-benefits-tracker-qa.apk"
 
 if [[ ! -f "$apk_path" ]]; then
   echo "QA APK is missing: $apk_path" >&2
