@@ -111,8 +111,8 @@ mustContain(html, "onboarded:false", "fresh state onboarding gate");
 mustContain(html, "legalAcceptance:null", "fresh state legal acceptance");
 mustContain(
   html,
-  "function onboardingSequence(){return ['legal','program'];}",
-  "idiot-test onboarding sequence",
+  "function onboardingSequence(){return ['legal'];}",
+  "consent-only onboarding sequence",
 );
 mustContain(html, "id=\"onLegalCombined\"", "combined legal confirmation checkbox");
 mustContain(

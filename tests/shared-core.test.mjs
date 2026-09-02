@@ -8,6 +8,9 @@ const nativeApp = await readFile(new URL("../App.tsx", import.meta.url), "utf8")
 const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/gi)].map(
   (match) => match[1],
 );
+const minimalFlowStart = html.indexOf("/* Minimal Shop flow:");
+const minimalFlowEnd = html.indexOf("async function init()", minimalFlowStart);
+const minimalFlow = html.slice(minimalFlowStart, minimalFlowEnd);
 
 test("every inline application script parses", () => {
   assert.ok(scripts.length >= 5, "expected the canonical inline app scripts");
@@ -222,6 +225,7 @@ test("cash checkout completes through transaction remediation", async () => {
   state.onboarded = true;
   state.settings.language = "en-US";
   state.settings.programJurisdiction = "US_SNAP";
+  setCashPeriod(state, { start: "2026-09-01", end: "2026-09-30" });
   state.cash.baseBudget = 299;
   state.cash.periodBudget = 299;
   state.basket = {
@@ -343,24 +347,32 @@ test("shopping is staged from store to groceries to funding to review", () => {
 });
 
 test("barcode entry is the first-class shopping action with manual fallbacks", () => {
-  assert.ok(html.includes('data-action="scan-barcode"'));
-  assert.ok(html.includes("type:'open-barcode-scanner'"));
-  assert.ok(html.includes("showBarcodeFallback()"));
-  assert.ok(html.includes("['ean13','ean8','upc_a','upc_e']"));
+  assert.ok(minimalFlow.includes('data-action="scan-barcode"'));
+  assert.ok(minimalFlow.includes("type:'open-barcode-scanner'"));
+  assert.ok(minimalFlow.includes("d.entryMode='SCANNED'"));
+  assert.ok(minimalFlow.includes("d.entryMode='MANUAL'"));
+  assert.ok(minimalFlow.includes("['ean13','ean8','upc_a','upc_e']"));
 });
 
-test("primary screens use page headers and funding is promoted", () => {
+test("Shop progressively reveals only the controls required by the selected route", () => {
   assert.ok(html.includes("const TOPBAR_TITLE_ROUTES=new Set();"));
   assert.ok(html.includes("normalizePagePresentation(currentRoute)"));
-  assert.ok(html.includes("form.insertBefore(funding,details)"));
-  assert.ok(html.includes("fundingMode:'UNSURE'"));
+  assert.ok(minimalFlow.includes('data-action="choose-shop-mode"'));
+  assert.ok(minimalFlow.includes('id="wicItemSelect"'));
+  assert.ok(minimalFlow.includes("d.fundingMode==='WIC'?minimalWicEntryHtml"));
+  assert.ok(minimalFlow.includes("d.entryMode==='MANUAL'"));
+  assert.ok(!minimalFlow.includes('id="shopTransactionDate"'));
+  assert.ok(!minimalFlow.includes('id="priceEntryMode"'));
+  assert.ok(!minimalFlow.includes('id="itemBrandInput"'));
 });
 
-test("saved baskets can be created outside the shopping flow", () => {
+test("saved baskets load as exact checkout-ready templates", () => {
   assert.ok(html.includes('id="homeSavedBaskets"'));
-  assert.ok(html.includes("function newSavedBasketDraft()"));
-  assert.ok(html.includes('data-action="standalone-saved-create"'));
-  assert.ok(html.includes("function saveStandaloneBasket()"));
+  assert.ok(minimalFlow.includes("function exactSavedItem"));
+  assert.ok(minimalFlow.includes("funding=C.clone(item.funding||item.suggestedFunding"));
+  assert.ok(minimalFlow.includes("unitPriceCents:storedPrice,priceKnown:known"));
+  assert.ok(minimalFlow.includes("quantity:quantity.value,quantityRaw:quantity.raw"));
+  assert.ok(!minimalFlow.includes('data-action="standalone-saved-create"'));
 });
 
 test("numeric fields are routed through one in-app keypad", () => {
@@ -375,11 +387,26 @@ test("device language automatically selects en-US or es-PR", () => {
   assert.ok(html.includes("window.addEventListener('languagechange',()=>syncDeviceLocale())"));
 });
 
-test("onboarding keeps legal consent compact and benefit choice before setup", () => {
-  assert.ok(html.includes("function onboardingSequence(){return ['legal','program'];}"));
+test("settings stacks program guidance and provides a persistent language selector", () => {
+  assert.ok(html.includes(".program-setting>span,.program-setting>div{display:grid;gap:3px}"));
+  assert.ok(html.includes(".settings-list>.setting-row,.purchase-settings>.setting-row,.legal-settings>.setting-row{padding:14px 0}"));
+  assert.ok(html.includes('id="languageSetting"'));
+  assert.ok(html.includes("next.settings.language=target.value"));
+  assert.ok(html.includes("state?.onboarded&&VALID_LOCALES.has(state?.settings?.language)"));
+});
+
+test("Help gives a minimal numbered guide for the complete shopping flow", () => {
+  assert.ok(html.includes('<ol class="help-steps">'));
+  assert.ok(html.includes("[1,2,3,4,5,6].map"));
+  assert.ok(html.includes('"help.step5Body": "Tap Review. Fix any notice, then tap Complete checkout."'));
+  assert.ok(html.includes('"help.step6Body": "After checkout, tap Save list. Next time, load that Saved Basket."'));
+});
+
+test("onboarding finishes after legal consent and opens the self-explanatory home setup", () => {
+  assert.ok(html.includes("function onboardingSequence(){return ['legal'];}"));
   assert.ok(html.includes('id="onLegalCombined"'));
-  assert.ok(html.includes("['LATER',tr('stream.later')]"));
-  assert.ok(!html.includes("id=\"onSnapBalance\" class=\"money-entry\"") || html.includes("if(step==='snap')"));
+  assert.ok(!html.includes("if(step==='program')body="));
+  assert.ok(html.includes("next.settings.enabledPrograms=[];next.settings.enabledProgramsChosen=true;"));
 });
 
 test("prices use ordinary decimal input and exact cents internally", () => {
@@ -389,11 +416,17 @@ test("prices use ordinary decimal input and exact cents internally", () => {
   assert.equal(core.cents("0.09"), 9);
 });
 
-test("reusable lists retain prior price, classification, and eligibility", () => {
-  assert.ok(html.includes("previousPriceCents:i.priceKnown!==false&&i.unitPriceCents!=null?i.unitPriceCents:null"));
-  assert.ok(html.includes("category:C.normalizeCategoryId(i.category)"));
-  assert.ok(html.includes("snapEligibility:i.snapEligibility||'UNSURE'"));
-  assert.ok(html.includes("priceRaw:Number.isSafeInteger(price)?R.centsToMoneyInput(price):''"));
+test("saved baskets preserve price, quantity, payment mapping, and automatic validation notices", () => {
+  assert.ok(minimalFlow.includes("items:state.basket.items.map(item=>exactSavedItem(item,today()))"));
+  assert.ok(minimalFlow.includes("suggestedFunding:C.clone(funding)"));
+  assert.ok(minimalFlow.includes("compactBasketValidationHtml()"));
+  assert.ok(minimalFlow.includes("C.validateBasketForCheckout(state,state.basket,today())"));
+  assert.ok(minimalFlow.includes("for(const issue of validation.warnings)"));
+});
+
+test("SNAP balance actions save on the first tap", () => {
+  assert.ok(minimalFlow.includes("preMinimalPreviewSnapSave(id,mode)"));
+  assert.ok(minimalFlow.includes("if(snapEditDraft)void saveSnap()"));
 });
 
 test("unselected benefit programs are hidden from summaries and funding", () => {
