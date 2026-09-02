@@ -363,6 +363,8 @@ type BarcodeScannerRequest = {
   barcodeTypes: BarcodeType[];
   locale: "en-US" | "es-PR";
   permissionGranted: boolean;
+  requestId: string;
+  draftId: string;
 };
 
 const GROCERY_BARCODE_TYPES = [
@@ -415,6 +417,8 @@ type BridgeMessage =
       type: "open-barcode-scanner";
       locale?: string;
       formats?: unknown;
+      requestId?: string;
+      draftId?: string;
     };
 
 const NATIVE_COPY = {
@@ -1124,6 +1128,10 @@ export default function App() {
   const androidBackRequestAtRef = useRef(0);
   const barcodeScannerOpenRef = useRef(false);
   const barcodeResultConsumedRef = useRef(false);
+  const barcodeRequestContextRef = useRef<{
+    requestId: string;
+    draftId: string;
+  } | null>(null);
   const adsInitializationRef = useRef<Promise<boolean> | null>(null);
   const previousWebAdStateRef = useRef("AD_LOADING");
   const removeAdsEntitlementRef =
@@ -1437,7 +1445,12 @@ export default function App() {
     const appStateSubscription = AppState.addEventListener(
       "change",
       (state) => {
-        if (active && state === "active") void ensureStoreConnection();
+        if (active && state === "active") {
+          void ensureStoreConnection();
+          webViewRef.current?.injectJavaScript(
+            "window.GBTApp?.resume?.(); true;",
+          );
+        }
       },
     );
     void ensureStoreConnection();
@@ -2192,11 +2205,13 @@ export default function App() {
       }
       barcodeResultConsumedRef.current = true;
       barcodeScannerOpenRef.current = false;
+      const context = barcodeRequestContextRef.current;
+      barcodeRequestContextRef.current = null;
       setBarcodeScannerRequest(null);
       const argumentsList =
         result === "complete"
-          ? `${JSON.stringify(value || "")},${JSON.stringify(format || "")}`
-          : "";
+          ? `${JSON.stringify(value || "")},${JSON.stringify(format || "")},null,${JSON.stringify(context)}`
+          : `${JSON.stringify(context)}`;
       webViewRef.current?.injectJavaScript(`
         window.GBTBarcodeScanner?.${result}(${argumentsList});
         true;
@@ -2212,8 +2227,12 @@ export default function App() {
   const openBarcodeScanner = useCallback(
     async (message: Extract<BridgeMessage, { type: "open-barcode-scanner" }>) => {
       if (barcodeScannerOpenRef.current) return;
+      const requestId = String(message.requestId || "");
+      const draftId = String(message.draftId || "");
+      if (!requestId || !draftId) return;
       barcodeScannerOpenRef.current = true;
       barcodeResultConsumedRef.current = false;
+      barcodeRequestContextRef.current = { requestId, draftId };
       const locale = message.locale === "es-PR" ? "es-PR" : "en-US";
       const copy = NATIVE_COPY[locale];
       const barcodeTypes = requestedGroceryBarcodeTypes(message.formats);
@@ -2221,6 +2240,8 @@ export default function App() {
         barcodeTypes,
         locale,
         permissionGranted: cameraPermission?.granted === true,
+        requestId,
+        draftId,
       });
 
       try {

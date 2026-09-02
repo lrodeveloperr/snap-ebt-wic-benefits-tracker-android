@@ -473,15 +473,15 @@ test("Android scanner passes barcode type through and every result is surfaced",
   assert.ok(nativeApp.includes('const format = String(result.type || "").toLowerCase();'));
   assert.ok(nativeApp.includes('finishBarcodeScanner("complete", value, format);'));
   assert.ok(nativeApp.includes("GBTBarcodeScanner?.${result}(${argumentsList})"));
-  assert.ok(html.includes("function applyBarcodeResult(value,format='',nativeRecord=null)"));
+  assert.ok(html.includes("function applyBarcodeResult(value,format='',nativeRecord=null,context=null)"));
   for (const key of ["stream.barcodeMatched", "stream.barcodeNew", "stream.barcodeInvalid"]) {
     assert.ok(html.includes(`tr('${key}'`), `${key} must be shown to the user`);
   }
-  assert.ok(html.includes("cancel:()=>toast(tr('stream.scanCancelled'))"));
+  assert.ok(html.includes("cancel:context=>{if(!barcodeScanContextMatches(context))return;activeBarcodeScan=null;toast(tr('stream.scanCancelled'))"));
   assert.ok(nativeApp.includes("Alert.alert(copy.cameraPermissionTitle, copy.cameraPermissionBody"));
   assert.ok(nativeApp.includes("copy.cameraOpenFailedBody"));
   assert.ok(nativeApp.includes("copy.scannerStartFailedBody"));
-  assert.ok(html.includes("catch(_){toast(tr('stream.scanUnavailable'))"));
+  assert.ok(html.includes("catch(_){activeBarcodeScan=null;toast(tr('stream.scanUnavailable'))"));
 });
 
 test("a newly scanned barcode is learned only with the atomic basket save", () => {
@@ -505,7 +505,7 @@ test("grocery entry requires an explicit payment choice before scan or typing", 
   assert.ok(html.includes('id="fundingChoice" class="payment-first"'));
   assert.ok(html.includes("const validPayment=['SNAP','CASH','WIC'].includes(d.fundingMode)"));
   assert.ok(html.includes("if(!['SNAP','CASH','WIC'].includes(d.fundingMode))errors.push(['fundingChoice'"));
-  assert.ok(html.includes("d.fundingMode==='WIC'&&!selectedWicPair(d)"));
+  assert.ok(html.includes("if(d.fundingMode==='WIC'){const pair=selectedWicPair(d);if(!pair)"));
   assert.ok(html.includes("opts.push(['CASH',tr('funding.cash')]);"));
   assert.ok(!html.includes("opts.push(['CASH',tr('funding.cash')],['UNSURE',tr('funding.unsure')])"));
 });
@@ -562,6 +562,76 @@ test("saved baskets can be created outside the shopping flow", () => {
   assert.ok(html.includes("function newSavedBasketDraft()"));
   assert.ok(html.includes('data-action="standalone-saved-create"'));
   assert.ok(html.includes("function saveStandaloneBasket()"));
+});
+
+test("saved-basket checklist restores price and quantity but always remaps payment", () => {
+  const start = html.indexOf("function savedItemsForLoad");
+  const end = html.indexOf("\nloadSavedPrompt=", start);
+  assert.ok(start >= 0 && end > start, "active saved-basket loader must exist");
+  const context = {
+    strictSavedQuantity: (item) => ({ value: Number(item.quantityRaw), raw: item.quantityRaw }),
+    C: { id: () => "loaded-1", normalizeCategoryId: (value) => value || "other" },
+    R: { centsToMoneyInput: (value) => (value / 100).toFixed(2) },
+  };
+  vm.runInNewContext(
+    `${html.slice(start, end)};this.savedItemsForLoad=savedItemsForLoad;`,
+    context,
+  );
+  const [loaded] = context.savedItemsForLoad({
+    createdAt: "2026-08-20T12:00:00.000Z",
+    items: [{
+      name: "Bread",
+      quantityRaw: "3",
+      quantityUnit: "each",
+      previousPriceCents: 199,
+      previousPriceEntryMode: "UNIT_PRICE",
+      category: "bakery",
+      suggestedFunding: "SNAP",
+    }],
+  });
+  assert.equal(loaded.quantity, 3);
+  assert.equal(loaded.quantityRaw, "3");
+  assert.equal(loaded.unitPriceCents, 199);
+  assert.equal(loaded.priceRaw, "1.99");
+  assert.equal(loaded.priceKnown, true);
+  assert.equal(loaded.funding.mode, "UNSURE");
+  assert.equal(loaded.funding.needsResolution, true);
+  assert.ok(html.includes("suggestedFunding:null"));
+  assert.ok(html.includes("price=parseEntryMoney(priceRaw)"));
+  assert.ok(html.includes("if(!price.ok){toast(tr(priceRaw?'entry.invalidNumber':'entry.required'))"));
+});
+
+test("Shop relevance checklist keeps Scan and Lists out of the WIC inventory path", () => {
+  const start = html.indexOf("renderShop=function()");
+  const end = html.indexOf("\ndocument.addEventListener('click',event=>", start);
+  assert.ok(start >= 0 && end > start, "active Shop renderer must exist");
+  const renderer = html.slice(start, end);
+  const wicStart = renderer.indexOf("const wicEntry=");
+  const normalStart = renderer.indexOf("const itemEntry=", wicStart);
+  const wicOnly = renderer.slice(wicStart, normalStart);
+  assert.ok(wicOnly.includes("tr('stream.wicNoScan')"));
+  assert.ok(!wicOnly.includes('data-action="scan-barcode"'));
+  assert.ok(!wicOnly.includes('data-route="saved"'));
+  assert.ok(renderer.includes("${state.savedBaskets.length?`<button type=\"button\" data-route=\"saved\""));
+  assert.ok(renderer.includes('data-action="scan-barcode"'));
+  assert.ok(renderer.includes("d.fundingMode==='WIC'?wicEntry"));
+});
+
+test("quantity and automatic-date checklist matches the simplified shopping contract", () => {
+  const start = html.indexOf("renderShop=function()");
+  const end = html.indexOf("\ndocument.addEventListener('click',event=>", start);
+  const renderer = html.slice(start, end);
+  assert.ok(renderer.includes('id="quantityInput" class="stepper"'));
+  assert.ok(!renderer.includes('<input id="quantityInput"'));
+  assert.ok(renderer.includes('data-action="shop-quantity-minus"'));
+  assert.ok(renderer.includes('data-action="shop-quantity-plus"'));
+  assert.ok(html.includes('data-action="wic-quantity-minus"'));
+  assert.ok(html.includes('data-action="wic-quantity-plus"'));
+  assert.ok(html.includes('id="wicQtyInput" class="money-entry"'));
+  assert.ok(!renderer.includes("shopTransactionDate"));
+  assert.ok(html.includes("validate:()=>C.validateBasketForCheckout(state,state.basket,today())"));
+  assert.ok(html.includes("resume:async()=>{await processRuntimeTransitions()"));
+  assert.ok(nativeApp.includes('"window.GBTApp?.resume?.(); true;"'));
 });
 
 test("numeric fields are routed through one in-app keypad", () => {
@@ -647,6 +717,19 @@ test("WIC checkout updates quantity once without mutating the input state", () =
   const result = core.applyCheckoutTransaction(state, validation, { transactionDate: "2026-08-20" });
   assert.equal(result.state.wicCards[0].allowances[0].remaining, 1);
   assert.equal(state.wicCards[0].allowances[0].remaining, 2);
+});
+
+test("complete non-dollar WIC inventory purchases are not counted as unknown-price history", () => {
+  const core = loadCore();
+  const state = makeWicState(core);
+  state.basket.transactionDate = "2026-08-20";
+  state.basket.items = [wicItem({ priceKnown: false })];
+  const validation = core.validateBasketForCheckout(state, state.basket, "2026-08-20");
+  assert.equal(validation.blockers.length, 0);
+  const result = core.applyCheckoutTransaction(state, validation, {
+    transactionDate: "2026-08-20",
+  });
+  assert.equal(result.record.unknownPriceCount, 0);
 });
 
 test("non-dollar WIC requires full quantity coverage or an explicit remainder", () => {
@@ -1327,7 +1410,8 @@ test("reviewed UI safeguards remain wired into the canonical source", () => {
   assert.ok(html.includes("${historyTransferHtml()}"));
   assert.ok(html.includes("funding:{mode:'UNSURE',needsResolution:true}"));
   assert.ok(html.includes("priceKnown:false"));
-  assert.ok(html.includes("cancel:()=>toast(tr('stream.scanCancelled'))"));
+  assert.ok(html.includes("function barcodeScanContextMatches(context)"));
+  assert.ok(html.includes("cancel:context=>{if(!barcodeScanContextMatches(context))return"));
   assert.ok(html.includes("window.GBTAndroidBack=handleAndroidBack"));
 });
 
@@ -1366,8 +1450,9 @@ test("late review fixes remain wired into the active UI paths", () => {
   assert.ok(html.includes("if(item.priceKnown!==false&&item.unitPriceCents!=null){basketItem.funding.remainderType"));
   const periodFlow = html.match(/async function applyWicPeriod\(\)\{[^\n]+/)?.[0] || "";
   assert.ok(periodFlow.indexOf("if(source&&") < periodFlow.indexOf("if(duplicate&&"));
-  assert.ok(html.includes("const wicPair=d.fundingMode==='WIC'?selectedWicPair(d):null"));
-  assert.ok(html.includes("d.quantityUnit=wicPair&&wicPair.allowance.unit!=='$'?wicPair.allowance.unit"));
+  assert.ok(html.includes("function wicReservedInBasket(d,cardId,allowanceId)"));
+  assert.ok(html.includes("availableNow=Math.max(0,Number(x.allowance.remaining)-wicReservedInBasket"));
+  assert.ok(html.includes("next.basket.transactionDate=today()"));
 });
 
 test("history import suggestions merge without erasing learned shopping recents", () => {
@@ -1398,5 +1483,5 @@ test("learned barcode records retain the product details needed on the next scan
   assert.ok(html.includes("brand:item.brand||'',category:C.normalizeCategoryId(item.category),quantityUnit:item.quantityUnit||'each'"));
   assert.ok(html.includes("d.brand=known.brand||''"));
   assert.ok(html.includes("known.category||'other'"));
-  assert.ok(html.includes("(known.quantityUnit||'each')"));
+  assert.ok(html.includes("d.quantityUnit=known.quantityUnit||'each'"));
 });
