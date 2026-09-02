@@ -155,6 +155,78 @@ test("canonical state starts behind the legal/onboarding gate", () => {
   assert.deepEqual(Array.from(state.basket.items), []);
 });
 
+test("native notification consent survives every normalization path", () => {
+  const core = loadCore();
+  const state = core.canonicalState();
+  assert.equal(state.settings.localNotificationsEnabled, false);
+  state.settings.localNotificationsEnabled = true;
+  assert.equal(core.normalizeState(state).settings.localNotificationsEnabled, true);
+  assert.equal(core.migrateLegacyState(state).settings.localNotificationsEnabled, true);
+});
+
+test("cash periods fast-forward after long inactivity without repeated rollover prompts", () => {
+  const core = loadCore();
+  for (const config of [
+    { start: "2020-01-01", cycle: "weekly" },
+    { start: "2020-01-01", cycle: "biweekly" },
+    { start: "2020-01-31", cycle: "monthly" },
+    { start: "2020-01-01", cycle: "custom", customDays: 3 },
+  ]) {
+    const empty = core.canonicalState();
+    empty.cash = core.makeCashPeriod({ baseBudget: 0, ...config });
+    const advanced = core.processExpiredCashPeriod(empty, "2026-09-02");
+    assert.equal(advanced.changed, true, config.cycle);
+    assert.equal(advanced.pending, false, config.cycle);
+    assert.ok(advanced.state.cash.start <= "2026-09-02", config.cycle);
+    assert.ok(advanced.state.cash.end >= "2026-09-02", config.cycle);
+    assert.equal(advanced.state.cash.periodHistory.length, 1, config.cycle);
+  }
+
+  const remainder = core.canonicalState();
+  remainder.cash = core.makeCashPeriod({
+    baseBudget: 1_000,
+    start: "2020-01-01",
+    cycle: "custom",
+    customDays: 1,
+  });
+  const pending = core.processExpiredCashPeriod(remainder, "2026-09-02");
+  assert.equal(pending.pending, true);
+  assert.equal(pending.state.cash.pendingRollover.nextStart, "2026-09-02");
+  const carried = core.applyRolloverChoice(pending.state, "carry");
+  assert.equal(carried.cash.start, "2026-09-02");
+  assert.equal(carried.cash.end, "2026-09-02");
+  assert.equal(carried.cash.carryover, 1_000);
+  assert.equal(core.processExpiredCashPeriod(carried, "2026-09-02").pending, false);
+});
+
+test("Cash amount edits preserve the active period while timing changes archive it", () => {
+  const core = loadCore();
+  const state = core.canonicalState();
+  setCashPeriod(state, { start: "2026-08-01", end: "2026-08-31", spent: 250 });
+  state.cash.baseBudget = 1_000;
+  state.cash.periodBudget = 1_000;
+  const amountOnly = core.updateCashBudgetAmount(state, 1_500);
+  assert.equal(amountOnly.cash.periodId, "cash-current");
+  assert.equal(amountOnly.cash.start, "2026-08-01");
+  assert.equal(amountOnly.cash.end, "2026-08-31");
+  assert.equal(amountOnly.cash.spent, 250);
+  assert.equal(amountOnly.cash.periodBudget, 1_500);
+
+  let retimed = core.resetCashTiming(state, {
+    cycle: "weekly",
+    start: "2026-09-02",
+    customDays: 21,
+  });
+  retimed = core.updateCashBudgetAmount(retimed, 2_000);
+  assert.notEqual(retimed.cash.periodId, "cash-current");
+  assert.equal(retimed.cash.start, "2026-09-02");
+  assert.equal(retimed.cash.spent, 0);
+  assert.equal(retimed.cash.baseBudget, 2_000);
+  assert.equal(retimed.cash.periodHistory[0].id, "cash-current");
+  assert.equal(retimed.cash.periodHistory[0].spent, 250);
+  assert.equal(retimed.cash.periodHistory[0].baseBudget, 1_000);
+});
+
 test("money and quantity calculations stay exact in cents", () => {
   const core = loadCore();
   assert.equal(core.cents("$12.34"), 1234);
@@ -405,6 +477,7 @@ test("Android scanner passes barcode type through and every result is surfaced",
   for (const key of ["stream.barcodeMatched", "stream.barcodeNew", "stream.barcodeInvalid"]) {
     assert.ok(html.includes(`tr('${key}'`), `${key} must be shown to the user`);
   }
+  assert.ok(html.includes("cancel:()=>toast(tr('stream.scanCancelled'))"));
   assert.ok(nativeApp.includes("Alert.alert(copy.cameraPermissionTitle, copy.cameraPermissionBody"));
   assert.ok(nativeApp.includes("copy.cameraOpenFailedBody"));
   assert.ok(nativeApp.includes("copy.scannerStartFailedBody"));
@@ -660,6 +733,48 @@ test("a partial non-dollar WIC purchase can allocate the exact remainder to SNAP
   );
 });
 
+test("history correction supports partial non-dollar WIC plus Cash", () => {
+  const core = loadCore();
+  const state = makeWicState(core);
+  setCashPeriod(state);
+  state.basket.items = [wicItem({
+    id: "partial-correction",
+    quantity: 2,
+    quantityUnit: "dozen",
+    unitPriceCents: 600,
+    funding: { mode: "CASH" },
+  })];
+  const checkout = core.applyCheckoutTransaction(
+    state,
+    core.validateBasketForCheckout(state, state.basket, "2026-08-20"),
+    { transactionDate: "2026-08-20" },
+  ).state;
+  const transaction = checkout.history[0];
+  const correction = core.correctHistoryItemFunding(
+    checkout,
+    transaction.id,
+    transaction.items[0].id,
+    {
+      ...transaction.items[0],
+      funding: {
+        mode: "WIC",
+        wicCardId: "wic-1",
+        allowanceId: "benefit-1",
+        wicQuantity: 1,
+        wicUnit: "dozen",
+        remainderType: "CASH",
+      },
+    },
+  );
+  assert.deepEqual(Array.from(correction.validation.blockers), []);
+  assert.equal(correction.state.wicCards[0].allowances[0].remaining, 23);
+  assert.equal(correction.state.cash.spent, 600);
+  assert.deepEqual(
+    Array.from(correction.state.history[0].items[0].allocations, (row) => row.type),
+    ["WIC", "CASH"],
+  );
+});
+
 test("Cash checkout requires a current or archived period for its transaction date", () => {
   const core = loadCore();
   const state = core.canonicalState();
@@ -687,9 +802,50 @@ test("checkout defensively rejects a stale Cash plan for a different period", ()
   setCashPeriod(state, { start: "2026-08-01", end: "2026-08-31" });
   state.basket.items = [{ id: "cash-1", name: "Rice", quantity: 1, quantityRaw: "1", unitPriceCents: 500, priceKnown: true, funding: { mode: "CASH" } }];
   const valid = core.validateBasketForCheckout(state, state.basket, "2026-08-20");
-  assert.throws(() => core.applyCheckoutTransaction(state, valid, { transactionDate: "2026-09-20" }), /CASH_PERIOD_UNAVAILABLE/);
+  assert.throws(
+    () => core.applyCheckoutTransaction(state, valid, { transactionDate: "2026-09-20" }),
+    (error) => error?.code === "CHECKOUT_PLAN_INVALID" && error?.meta?.blockers?.includes("CASH_PERIOD_UNAVAILABLE"),
+  );
   assert.equal(state.cash.spent, 0);
   assert.equal(state.history.length, 0);
+});
+
+test("checkout recomputes stale plans against the current basket and ledger", () => {
+  const core = loadCore();
+  const state = core.canonicalState();
+  setCashPeriod(state, { start: "2026-08-01", end: "2026-08-31" });
+  state.basket.items = [{ id: "cash-1", name: "Rice", quantity: 1, quantityRaw: "1", unitPriceCents: 500, priceKnown: true, funding: { mode: "CASH" } }];
+  const staleBasketPlan = core.validateBasketForCheckout(state, state.basket, "2026-08-20");
+  state.basket.items[0].unitPriceCents = 800;
+  const recalculated = core.applyCheckoutTransaction(state, staleBasketPlan, { transactionDate: "2026-08-20" });
+  assert.equal(recalculated.state.cash.spent, 800);
+  assert.equal(recalculated.record.totalKnownCents, 800);
+
+  const snapState = core.canonicalState();
+  addSnapCard(core, snapState, 500);
+  setCashPeriod(snapState);
+  snapState.basket.items = [{ id: "snap-1-item", name: "Beans", quantity: 1, quantityRaw: "1", unitPriceCents: 500, priceKnown: true, snapEligibility: "ELIGIBLE", funding: { mode: "SNAP", snapCardId: "snap-1" } }];
+  const staleLedgerPlan = core.validateBasketForCheckout(snapState, snapState.basket, "2026-08-20");
+  snapState.snapCards[0].balance = 100;
+  assert.throws(
+    () => core.applyCheckoutTransaction(snapState, staleLedgerPlan, { transactionDate: "2026-08-20" }),
+    (error) => error?.code === "CHECKOUT_PLAN_INVALID",
+  );
+  assert.equal(snapState.snapCards[0].balance, 100);
+  assert.equal(snapState.history.length, 0);
+});
+
+test("checkout uses the transaction date's current cash period, never a stale plan period", () => {
+  const core = loadCore();
+  const state = core.canonicalState();
+  setCashPeriod(state, { start: "2026-09-01", end: "2026-09-30", spent: 50 });
+  state.cash.periodHistory = [{ id: "cash-aug", start: "2026-08-01", end: "2026-08-31", periodBudget: 5_000, spent: 100 }];
+  state.basket.items = [{ id: "cash-1", name: "Rice", quantity: 1, quantityRaw: "1", unitPriceCents: 500, priceKnown: true, funding: { mode: "CASH" } }];
+  const augustPlan = core.validateBasketForCheckout(state, state.basket, "2026-08-20");
+  const september = core.applyCheckoutTransaction(state, augustPlan, { transactionDate: "2026-09-20" });
+  assert.equal(september.record.cashPeriodId, "cash-current");
+  assert.equal(september.state.cash.spent, 550);
+  assert.equal(september.state.cash.periodHistory[0].spent, 100);
 });
 
 test("SNAP plus Cash requires two positive allocations and never records zero Cash", () => {
@@ -781,6 +937,43 @@ test("history correction applies Cash to the archived transaction-date period", 
   assert.deepEqual(Array.from(correction.validation.blockers), []);
   assert.equal(correction.state.cash.periodHistory[0].spent, 600);
   assert.equal(correction.state.history[0].items[0].allocations[0].type, "CASH");
+});
+
+test("history correction never rewrites a transaction when its Cash ledger is missing", () => {
+  const core = loadCore();
+  const state = core.canonicalState();
+  addSnapCard(core, state);
+  setCashPeriod(state, { start: "2026-08-01", end: "2026-08-31" });
+  state.basket.items = [{ id: "item-1", name: "Rice", quantity: 1, quantityRaw: "1", unitPriceCents: 500, priceKnown: true, snapEligibility: "ELIGIBLE", funding: { mode: "CASH" } }];
+  const checked = core.applyCheckoutTransaction(state, core.validateBasketForCheckout(state, state.basket, "2026-08-20"), { transactionDate: "2026-08-20" }).state;
+  checked.cash.periodId = "replacement-period";
+  checked.cash.periodHistory = [];
+  const before = structuredClone(checked);
+  const tx = checked.history[0];
+  const replacement = { ...tx.items[0], funding: { mode: "SNAP", snapCardId: "snap-1" } };
+  assert.throws(
+    () => core.correctHistoryItemFunding(checked, tx.id, tx.items[0].id, replacement),
+    (error) => error?.code === "CASH_PERIOD_UNAVAILABLE_CORRECTION",
+  );
+  assert.throws(
+    () => core.correctHistoryTransactionDetails(checked, tx.id, { store: tx.store, transactionDate: tx.transactionDate, items: [replacement] }),
+    (error) => error?.code === "CASH_PERIOD_UNAVAILABLE_CORRECTION",
+  );
+  assert.equal(JSON.stringify(checked), JSON.stringify(before));
+});
+
+test("removing the last Cash allocation clears the history Cash period link", () => {
+  const core = loadCore();
+  const state = core.canonicalState();
+  addSnapCard(core, state);
+  setCashPeriod(state, { start: "2026-08-01", end: "2026-08-31" });
+  state.basket.items = [{ id: "item-1", name: "Rice", quantity: 1, quantityRaw: "1", unitPriceCents: 500, priceKnown: true, snapEligibility: "ELIGIBLE", funding: { mode: "CASH" } }];
+  const checked = core.applyCheckoutTransaction(state, core.validateBasketForCheckout(state, state.basket, "2026-08-20"), { transactionDate: "2026-08-20" }).state;
+  const tx = checked.history[0];
+  const corrected = core.correctHistoryItemFunding(checked, tx.id, tx.items[0].id, { ...tx.items[0], funding: { mode: "SNAP", snapCardId: "snap-1" } });
+  assert.deepEqual(Array.from(corrected.validation.blockers), []);
+  assert.equal(corrected.state.history[0].cashPeriodId, null);
+  assert.equal(corrected.state.cash.spent, 0);
 });
 
 test("history corrections preserve the recorded jurisdiction snapshot", () => {
@@ -997,6 +1190,43 @@ test("voiding a local checkout atomically restores every ledger", () => {
   );
 });
 
+test("imported history is read-only in every core mutation API", () => {
+  const core = loadCore();
+  const state = core.canonicalState();
+  setCashPeriod(state);
+  state.history = [{
+    id: "imported-1",
+    importedHistory: true,
+    status: "COMPLETED",
+    store: "Imported Market",
+    transactionDate: "2026-08-12",
+    cashPeriodId: null,
+    items: [{ id: "item-1", name: "Rice", quantity: 1, quantityRaw: "1", unitPriceCents: 500, priceKnown: true, allocations: [] }],
+  }];
+  const replacement = { ...state.history[0].items[0], funding: { mode: "CASH" } };
+  for (const mutate of [
+    () => core.correctHistoryItemFunding(state, "imported-1", "item-1", replacement),
+    () => core.correctHistoryTransactionDetails(state, "imported-1", { store: "Other", transactionDate: "2026-08-12", items: [replacement] }),
+  ]) {
+    assert.throws(mutate, (error) => error?.code === "CHECKOUT_PLAN_INVALID");
+  }
+  assert.equal(state.history[0].store, "Imported Market");
+});
+
+test("WIC reversal blocks an over-restoration after manual reconciliation", () => {
+  const core = loadCore();
+  const state = makeWicState(core, { allowanceUnit: "dozen", remaining: 2 });
+  state.basket.items = [wicItem({ quantity: 1, wicQuantity: 1 })];
+  const completed = core.applyCheckoutTransaction(state, core.validateBasketForCheckout(state, state.basket, "2026-08-20"), { transactionDate: "2026-08-20" }).state;
+  completed.wicCards[0].allowances[0].remaining = 2;
+  const before = structuredClone(completed);
+  assert.throws(
+    () => core.voidHistoryTransaction(completed, completed.history[0].id),
+    (error) => error?.code === "WIC_LEDGER_CHANGED",
+  );
+  assert.equal(JSON.stringify(completed), JSON.stringify(before));
+});
+
 test("English and Puerto Rican Spanish catalogs are complete and in parity", () => {
   const context = { console };
   context.globalThis = context;
@@ -1097,6 +1327,76 @@ test("reviewed UI safeguards remain wired into the canonical source", () => {
   assert.ok(html.includes("${historyTransferHtml()}"));
   assert.ok(html.includes("funding:{mode:'UNSURE',needsResolution:true}"));
   assert.ok(html.includes("priceKnown:false"));
-  assert.ok(html.includes("cancel:()=>{}"));
+  assert.ok(html.includes("cancel:()=>toast(tr('stream.scanCancelled'))"));
   assert.ok(html.includes("window.GBTAndroidBack=handleAndroidBack"));
+});
+
+test("dependent grocery values are cleared when their meaning changes", () => {
+  assert.ok(html.includes("else if(e.target.id==='priceEntryMode'){const d=ensureShopDraft();d.priceEntryMode=e.target.value;d.priceKnown=false;d.priceRaw='';"));
+  assert.ok(html.includes("else if(e.target.id==='quantityUnit'){const d=ensureShopDraft();if(d.quantityUnit!==e.target.value){d.quantityUnit=e.target.value;d.quantityRaw='';"));
+  assert.ok(!html.includes("if(e.target.id==='quantityUnit'){const d=ensureShopDraft();d.quantityUnit=e.target.value;"));
+  assert.ok(!html.includes("if(e.target.id==='priceEntryMode'){const d=ensureShopDraft();d.priceEntryMode=e.target.value;scheduleDraftPersistence"));
+});
+
+test("durable writes and checkout use captured revisions to reject lost updates", () => {
+  assert.ok(html.includes("baseRevision=expectedRevision"));
+  assert.ok(html.includes("durableStore.commit(candidate,{expectedRevision:baseRevision})"));
+  assert.ok(html.includes("if(checkoutCommitInFlight)return"));
+  assert.ok(html.includes("commitCritical(next,{expectedRevision:checkoutRevision})"));
+});
+
+test("durable settings wait for successful commits before the UI advances", () => {
+  assert.ok(html.includes("e.target.id==='privacySetting'){const next=C.clone(state)"));
+  assert.ok(html.includes("e.target.id==='programJurisdictionSetting'){const next=C.clone(state)"));
+  assert.ok(!html.includes("state.settings.privacyEnabled=e.target.checked;privacyReveal=false;persist()"));
+  assert.ok(!html.includes("state.settings.programJurisdiction=e.target.value;persist()"));
+});
+
+test("late review fixes remain wired into the active UI paths", () => {
+  assert.ok(html.includes("if(timingChanged){confirmCashTiming();return;}const next=C.updateCashBudgetAmount"));
+  assert.ok(html.includes("setFieldError('correctionWicQty',q.code);focusFirstError();return;"));
+  assert.ok(!html.includes("wicQuantity:(()=>{"));
+  assert.ok(html.includes("next=mergeImportedSuggestions(R.applyImportPlan"));
+  assert.ok(html.includes("function mergeImportedSuggestions(target,records)"));
+  assert.ok(html.includes("function hasNativeReminderCandidates(nextState)"));
+  assert.ok(html.includes("kind:'PERIOD_CLOSED'"));
+  assert.ok(html.includes("lastReplacedBasket?`<div class=\"notice info\">${tr('saved.replacedUndo')}"));
+  assert.ok(html.includes("fundingCheck.blockers.find(x=>x.itemId===candidate.id)"));
+  assert.ok(!html.includes("if(pair?.allowance.unit==='$'){item.funding.remainderType"));
+  assert.ok(html.includes("if(item.priceKnown!==false&&item.unitPriceCents!=null){basketItem.funding.remainderType"));
+  const periodFlow = html.match(/async function applyWicPeriod\(\)\{[^\n]+/)?.[0] || "";
+  assert.ok(periodFlow.indexOf("if(source&&") < periodFlow.indexOf("if(duplicate&&"));
+  assert.ok(html.includes("const wicPair=d.fundingMode==='WIC'?selectedWicPair(d):null"));
+  assert.ok(html.includes("d.quantityUnit=wicPair&&wicPair.allowance.unit!=='$'?wicPair.allowance.unit"));
+});
+
+test("history import suggestions merge without erasing learned shopping recents", () => {
+  const start = html.indexOf("function mergeImportedSuggestions");
+  const end = html.indexOf("function correctionWicRows", start);
+  assert.ok(start >= 0 && end > start);
+  const context = {
+    R: {
+      normalizeStore(value) {
+        const display = String(value || "").trim();
+        return { storeDisplayName: display, storeNormalizedKey: display.toLowerCase() };
+      },
+    },
+    normalizeSearch: (value) => String(value || "").trim().toLowerCase(),
+    recentItemEntry: (raw) => typeof raw === "string" ? { name: raw } : raw,
+  };
+  vm.runInNewContext(`${html.slice(start, end)};this.mergeImportedSuggestions=mergeImportedSuggestions;`, context);
+  const target = { recentStores: ["Local Market"], recentItems: [{ name: "Local bread" }] };
+  context.mergeImportedSuggestions(target, [{
+    store: "Imported Mart",
+    items: [{ name: "Imported beans", category: "pantry" }],
+  }]);
+  assert.deepEqual(Array.from(target.recentStores), ["Imported Mart", "Local Market"]);
+  assert.deepEqual(Array.from(target.recentItems, (row) => row.name), ["Imported beans", "Local bread"]);
+});
+
+test("learned barcode records retain the product details needed on the next scan", () => {
+  assert.ok(html.includes("brand:item.brand||'',category:C.normalizeCategoryId(item.category),quantityUnit:item.quantityUnit||'each'"));
+  assert.ok(html.includes("d.brand=known.brand||''"));
+  assert.ok(html.includes("known.category||'other'"));
+  assert.ok(html.includes("(known.quantityUnit||'each')"));
 });
