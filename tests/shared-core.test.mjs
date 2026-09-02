@@ -372,7 +372,12 @@ test("saved baskets load as exact checkout-ready templates", () => {
   assert.ok(minimalFlow.includes("funding=C.clone(item.funding||item.suggestedFunding"));
   assert.ok(minimalFlow.includes("unitPriceCents:storedPrice,priceKnown:known"));
   assert.ok(minimalFlow.includes("quantity:quantity.value,quantityRaw:quantity.raw"));
-  assert.ok(!minimalFlow.includes('data-action="standalone-saved-create"'));
+  assert.ok(html.includes('data-action="standalone-saved-create"'));
+  assert.ok(html.includes('data-action="standalone-saved-manage"'));
+  assert.ok(html.includes('data-action="standalone-saved-edit-item"'));
+  assert.ok(minimalFlow.includes('id="savedMergeMode"'));
+  assert.ok(minimalFlow.includes('data-mode="add"'));
+  assert.ok(minimalFlow.includes('data-mode="replace"'));
 });
 
 test("numeric fields are routed through one in-app keypad", () => {
@@ -400,6 +405,9 @@ test("Help gives a minimal numbered guide for the complete shopping flow", () =>
   assert.ok(html.includes("[1,2,3,4,5,6].map"));
   assert.ok(html.includes('"help.step5Body": "Tap Review. Fix any notice, then tap Complete checkout."'));
   assert.ok(html.includes('"help.step6Body": "After checkout, tap Save list. Next time, load that Saved Basket."'));
+  assert.ok(html.includes('id="helpDisclaimer"'));
+  assert.ok(html.includes("tr('help.privacyBody')"));
+  assert.ok(html.includes("tr('help.independenceBody')"));
 });
 
 test("onboarding finishes after legal consent and opens the self-explanatory home setup", () => {
@@ -419,9 +427,16 @@ test("prices use ordinary decimal input and exact cents internally", () => {
 test("saved baskets preserve price, quantity, payment mapping, and automatic validation notices", () => {
   assert.ok(minimalFlow.includes("items:state.basket.items.map(item=>exactSavedItem(item,today()))"));
   assert.ok(minimalFlow.includes("suggestedFunding:C.clone(funding)"));
+  assert.ok(html.includes("items:d.items.map(({id,...item})=>C.clone(item))"));
   assert.ok(minimalFlow.includes("compactBasketValidationHtml()"));
   assert.ok(minimalFlow.includes("C.validateBasketForCheckout(state,state.basket,today())"));
   assert.ok(minimalFlow.includes("for(const issue of validation.warnings)"));
+});
+
+test("barcode scans never invent SNAP eligibility", () => {
+  assert.ok(minimalFlow.includes("includes(known.snapEligibility))d.snapEligibility=known.snapEligibility"));
+  assert.ok(!minimalFlow.includes("d.snapEligibility=d.fundingMode==='SNAP'?'ELIGIBLE'"));
+  assert.ok(!minimalFlow.includes("d.snapEligibility='ELIGIBLE'"));
 });
 
 test("SNAP balance actions save on the first tap", () => {
