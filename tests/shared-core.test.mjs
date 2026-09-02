@@ -53,6 +53,20 @@ function loadCoreWithRemediation() {
   return { core: context.GBTCore, remediation: context.GBTRemediation };
 }
 
+function loadEnhancedCatalog() {
+  const context = { JSON };
+  context.globalThis = context;
+  context.window = context;
+  vm.runInNewContext(scripts[2], context, { filename: "gbt-catalog.js" });
+  context.C = { clone: (value) => JSON.parse(JSON.stringify(value)) };
+  context.SUPPORTED_LOCALES = ["en-US", "es-PR"];
+  const start = html.indexOf("const GROCERY_CATALOG_ADDITIONS");
+  const end = html.indexOf("\n\nfunction canonicalizeLocale", start);
+  assert.ok(start >= 0 && end > start, "catalog enhancement block must exist");
+  vm.runInNewContext(html.slice(start, end), context, { filename: "gbt-catalog-enhancements.js" });
+  return context.GROCERY_CATALOG;
+}
+
 function setCashPeriod(state, { start = "2026-08-01", end = "2026-08-31", spent = 0 } = {}) {
   state.cash.periodId = "cash-current";
   state.cash.start = start;
@@ -224,6 +238,8 @@ test("cash checkout completes through transaction remediation", async () => {
   state.settings.programJurisdiction = "US_SNAP";
   state.cash.baseBudget = 299;
   state.cash.periodBudget = 299;
+  state.cash.start = "2026-09-01";
+  state.cash.end = "2026-09-30";
   state.basket = {
     store: "Walmart",
     transactionDate: "2026-09-01",
@@ -349,11 +365,123 @@ test("barcode entry is the first-class shopping action with manual fallbacks", (
   assert.ok(html.includes("['ean13','ean8','upc_a','upc_e']"));
 });
 
-test("primary screens use page headers and funding is promoted", () => {
-  assert.ok(html.includes("const TOPBAR_TITLE_ROUTES=new Set();"));
+test("barcode normalization preserves symbology and validates GS1 check digits", () => {
+  const start = html.indexOf("function barcodeCheckDigit");
+  const end = html.indexOf("function showBarcodeFallback", start);
+  assert.ok(start >= 0 && end > start, "barcode helpers must exist");
+  const context = {};
+  vm.runInNewContext(
+    `${html.slice(start, end)};this.normalizeBarcode=normalizeBarcode;`,
+    context,
+  );
+
+  assert.equal(context.normalizeBarcode("036000291452", "upc_a"), "00036000291452");
+  assert.equal(context.normalizeBarcode("4006381333931", "ean13"), "04006381333931");
+  assert.equal(context.normalizeBarcode("96385074", "ean8"), "00000096385074");
+  // The same eight digits can be valid UPC-E and EAN-8. The scanner's format
+  // must decide whether the value is expanded or simply padded to GTIN-14.
+  assert.equal(context.normalizeBarcode("01234565", "upc_e"), "00012345000065");
+  assert.equal(context.normalizeBarcode("01234565", "ean8"), "00000001234565");
+  assert.equal(
+    context.normalizeBarcode("01234565", "upc_e"),
+    context.normalizeBarcode("012345000065", "upc_a"),
+  );
+  assert.equal(
+    context.normalizeBarcode("036000291452", "upc_a"),
+    context.normalizeBarcode("0036000291452", "ean13"),
+  );
+  assert.equal(context.normalizeBarcode("036000291453", "upc_a"), "");
+  assert.equal(context.normalizeBarcode("21234565", "upc_e"), "");
+  assert.equal(context.normalizeBarcode("UPC 036000291452", "upc_a"), "");
+});
+
+test("Android scanner passes barcode type through and every result is surfaced", () => {
+  assert.ok(nativeApp.includes('"ean13",\n  "ean8",\n  "upc_a",\n  "upc_e",'));
+  assert.ok(nativeApp.includes('const value = /^\\d+$/.test(rawValue) ? rawValue : displayValue;'));
+  assert.ok(nativeApp.includes('const format = String(result.type || "").toLowerCase();'));
+  assert.ok(nativeApp.includes('finishBarcodeScanner("complete", value, format);'));
+  assert.ok(nativeApp.includes("GBTBarcodeScanner?.${result}(${argumentsList})"));
+  assert.ok(html.includes("function applyBarcodeResult(value,format='',nativeRecord=null)"));
+  for (const key of ["stream.barcodeMatched", "stream.barcodeNew", "stream.barcodeInvalid"]) {
+    assert.ok(html.includes(`tr('${key}'`), `${key} must be shown to the user`);
+  }
+  assert.ok(nativeApp.includes("Alert.alert(copy.cameraPermissionTitle, copy.cameraPermissionBody"));
+  assert.ok(nativeApp.includes("copy.cameraOpenFailedBody"));
+  assert.ok(nativeApp.includes("copy.scannerStartFailedBody"));
+  assert.ok(html.includes("catch(_){toast(tr('stream.scanUnavailable'))"));
+});
+
+test("a newly scanned barcode is learned only with the atomic basket save", () => {
+  const submit = html.match(/function handleEntryFormSubmit\(e\)\{[^\n]+\}/)?.[0] || "";
+  assert.ok(submit.includes("triggerEntryFormAction(e.target)"));
+  assert.ok(!submit.includes("barcodeMappings"));
+  const atomicAdd = html.match(/addOrUpdateItem=async function\(\)\{[\s\S]*?\n\};/)?.[0] || "";
+  assert.ok(atomicAdd.includes("next.barcodeMappings[learnedBarcode]"));
+  assert.ok(atomicAdd.includes("await commitCritical(next)"));
+});
+
+test("primary screens use top app-bar headers and funding is promoted", () => {
+  assert.ok(html.includes("const TOPBAR_TITLE_ROUTES=new Set(['home','shop','history']);"));
   assert.ok(html.includes("normalizePagePresentation(currentRoute)"));
+  assert.ok(html.includes("page.querySelector(':scope > .page-head')?.remove()"));
   assert.ok(html.includes("form.insertBefore(funding,details)"));
   assert.ok(html.includes("fundingMode:'UNSURE'"));
+});
+
+test("grocery entry requires an explicit payment choice before scan or typing", () => {
+  assert.ok(html.includes('id="fundingChoice" class="payment-first"'));
+  assert.ok(html.includes("const validPayment=['SNAP','CASH','WIC'].includes(d.fundingMode)"));
+  assert.ok(html.includes("if(!['SNAP','CASH','WIC'].includes(d.fundingMode))errors.push(['fundingChoice'"));
+  assert.ok(html.includes("d.fundingMode==='WIC'&&!selectedWicPair(d)"));
+  assert.ok(html.includes("opts.push(['CASH',tr('funding.cash')]);"));
+  assert.ok(!html.includes("opts.push(['CASH',tr('funding.cash')],['UNSURE',tr('funding.unsure')])"));
+});
+
+test("SNAP and Cash use the short grocery-price-quantity-add loop", () => {
+  assert.ok(html.includes('"shop.addAndNext": "Add & next grocery"'));
+  assert.ok(html.includes('"shop.optionalDetails": "Optional details"'));
+  assert.ok(html.includes("if(cards.length<=1)return ''"), "one SNAP card should not add a selector");
+  assert.ok(html.includes("if(d.fundingMode==='CASH')return ''"), "Cash should not add a funding detail panel");
+  assert.ok(html.includes("${normalFields}<div id=\"shopErrorSummary\""));
+  assert.ok(html.includes("setTimeout(()=>el('shopPriceInput')?.focus(),0)"));
+});
+
+test("WIC entry uses inventory selection and keeps buying quantity aligned", () => {
+  assert.ok(html.includes("function chooseWicInventoryLine"));
+  assert.ok(html.includes("function setWicBuyingNow"));
+  assert.ok(html.includes("tr('wic.inventoryTitle')"));
+  assert.ok(html.includes("tr('wic.buyingNow')"));
+  assert.ok(html.includes("d.quantityUnit=pair.allowance.unit"));
+  assert.ok(html.includes("d.quantityRaw=raw"));
+});
+
+test("basket review exposes funding and before-deduction-after balances", () => {
+  assert.ok(html.includes('data-action="go-to-basket"'));
+  assert.ok(html.includes("function checkoutBalanceImpactHtml(validation)"));
+  for (const key of ["checkout.before", "checkout.deduction", "checkout.after"]) {
+    assert.ok(html.includes(`tr('${key}')`));
+  }
+  assert.ok(html.includes("plan.snapDeltas"));
+  assert.ok(html.includes("plan.wicDeltas"));
+  assert.ok(html.includes("plan.cashDeltaCents"));
+});
+
+test("suggestions stay closed until typing and rank contiguous matches", () => {
+  assert.ok(html.includes("function suggestionMatchRank(terms,query)"));
+  assert.ok(html.includes("if(!query)return []"));
+  assert.ok(html.includes("else if(term.startsWith(query))"));
+  assert.ok(html.includes("else if(term.includes(query))"));
+  assert.ok(html.includes("query.length>0&&list.length>0"));
+});
+
+test("home keeps card and budget management available after setup", () => {
+  assert.ok(html.includes('id="homeManageFunding"'));
+  assert.ok(html.includes("tr('home.manageFunding')"));
+});
+
+test("legal links fill the onboarding row", () => {
+  assert.ok(html.includes(".onboard-legal-links.two-links{grid-template-columns:repeat(2,minmax(0,1fr))}"));
+  assert.ok(html.includes('class="onboard-legal-links two-links"'));
 });
 
 test("saved baskets can be created outside the shopping flow", () => {
@@ -718,9 +846,92 @@ test("WIC edits reject remaining quantities above the starting amount", () => {
 
 test("the embedded catalogs retain all reviewed stores and grocery items", () => {
   const stores = JSON.parse(html.match(/window\.STORES=(\[[\s\S]*?\]);window\.GROCERY_CATALOG=/)[1]);
-  const catalog = JSON.parse(html.match(/window\.GROCERY_CATALOG=(\[[\s\S]*?\]);<\/script>/)[1]);
+  const bundledCatalog = JSON.parse(html.match(/window\.GROCERY_CATALOG=(\[[\s\S]*?\]);<\/script>/)[1]);
+  const catalog = loadEnhancedCatalog();
   assert.equal(stores.length, 243);
-  assert.equal(catalog.length, 687);
+  assert.equal(bundledCatalog.length, 687);
+  assert.equal(catalog.length, 696);
+  assert.equal(new Set(catalog.map((item) => item.id)).size, catalog.length);
+});
+
+test("common grocery search checklist is complete in English and Puerto Rican Spanish", () => {
+  const catalog = loadEnhancedCatalog();
+  const normalize = (value) => String(value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim();
+  const check = (locale, queries) => {
+    for (const query of queries) {
+      const normalized = normalize(query);
+      const found = catalog.some((item) => [
+        item.labels?.[locale],
+        ...(item.aliases?.[locale] || []),
+      ].some((term) => normalize(term).includes(normalized)));
+      assert.ok(found, `${locale} common grocery query is missing: ${query}`);
+    }
+  };
+  check("en-US", [
+    "bread", "biscuits", "chicken", "fish", "meat", "rice", "beans", "milk",
+    "eggs", "cheese", "cereal", "pasta", "flour", "sugar", "salt", "oil",
+    "coffee", "tea", "juice", "water", "potatoes", "onions", "tomatoes",
+    "lettuce", "carrots", "apples", "bananas", "oranges", "tortillas",
+    "crackers", "cookies", "yogurt", "butter", "peanut butter", "soap",
+    "diapers", "toilet paper", "plantains", "yuca", "scallions", "goat", "oxtail",
+  ]);
+  check("es-PR", [
+    "pan", "biscuits", "pollo", "pescado", "carne", "arroz", "habichuelas",
+    "leche", "huevos", "queso", "cereal", "pasta", "harina", "azúcar", "sal",
+    "aceite", "café", "té", "jugo", "agua", "papas", "cebollas", "tomates",
+    "lechuga", "zanahorias", "manzanas", "guineos", "naranjas", "tortillas",
+    "galletas saladas", "galletas dulces", "yogur", "mantequilla", "jabón",
+    "pañales", "papel higiénico", "plátanos", "yuca", "cebollines", "cabra", "rabo",
+  ]);
+});
+
+test("plain grocery queries rank a generic localized result first", () => {
+  const catalog = loadEnhancedCatalog();
+  const normalize = (value) => String(value || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
+  const rank = (term, query) => {
+    const value = normalize(term);
+    if (value === query) return 0;
+    if (value.startsWith(query)) return 1;
+    if (value.split(/\s+/).some((word) => word.startsWith(query))) return 2;
+    return value.includes(query) ? 3 : Infinity;
+  };
+  const first = (locale, query) => catalog
+    .map((item, order) => ({ item, order, rank: Math.min(...[
+      item.labels?.[locale],
+      ...(item.aliases?.[locale] || []),
+    ].map((term) => rank(term, normalize(query)))) }))
+    .filter((row) => Number.isFinite(row.rank))
+    .sort((a, b) => a.rank - b.rank || a.order - b.order)[0]?.item?.labels?.[locale];
+  assert.equal(first("en-US", "bread"), "Bread");
+  assert.equal(first("en-US", "biscuits"), "Biscuits");
+  assert.equal(first("en-US", "chicken"), "Chicken");
+  assert.equal(first("es-PR", "pan"), "Pan");
+  assert.equal(first("es-PR", "pollo"), "Pollo");
+});
+
+test("shopping category checklist covers every catalog item", () => {
+  const catalog = loadEnhancedCatalog();
+  const allowed = new Set([
+    "baby", "beverages", "dairy", "frozen", "grains", "household", "other",
+    "pantry", "pet", "prepared", "produce", "protein", "snacks",
+  ]);
+  for (const item of catalog) {
+    assert.ok(allowed.has(item.reportCategoryId), `${item.id} has no valid shopping category`);
+    assert.ok(!("nutritionGroupId" in item), `${item.id} must not contain nutrition tagging`);
+    assert.ok(!("verifiedNutrition" in item), `${item.id} must not contain nutrient facts`);
+    for (const locale of ["en-US", "es-PR"]) {
+      assert.ok(String(item.labels?.[locale] || "").trim(), `${item.id} needs ${locale} label`);
+      assert.ok(Array.isArray(item.aliases?.[locale]), `${item.id} needs ${locale} aliases`);
+    }
+  }
+  assert.equal(catalog.find((item) => item.id === "g0557")?.reportCategoryId, "grains");
+  for (const id of ["g0662", "g0663", "g0664"]) {
+    assert.equal(catalog.find((item) => item.id === id)?.reportCategoryId, "pantry");
+  }
 });
 
 test("voiding a local checkout atomically restores every ledger", () => {
@@ -826,11 +1037,7 @@ test("English and Puerto Rican Spanish catalogs are complete and in parity", () 
     }
   }
 
-  const catalogContext = {};
-  catalogContext.globalThis = catalogContext;
-  catalogContext.window = catalogContext;
-  vm.runInNewContext(scripts[2], catalogContext, { filename: "gbt-catalog.js" });
-  const catalog = catalogContext.GROCERY_CATALOG;
+  const catalog = loadEnhancedCatalog();
   assert.ok(Array.isArray(catalog) && catalog.length > 0, "the grocery catalog must load");
   for (const item of catalog) {
     assert.ok(String(item.labels?.["en-US"] || "").trim(), `${item.id} needs an English label`);

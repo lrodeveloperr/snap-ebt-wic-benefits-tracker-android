@@ -1,0 +1,83 @@
+name: Android Storefront Screenshots
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - codex/grocery-layout-polish
+    paths:
+      - .github/workflows/android-storefront-screenshots.yml
+      - App.tsx
+      - app.html
+      - scripts/generate-android-storefront-screenshots.mjs
+      - src/appHtml.ts
+
+permissions:
+  contents: read
+
+jobs:
+  capture:
+    name: Capture English and Spanish screenshots
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      CI: "1"
+      EXPO_NO_TELEMETRY: "1"
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Use Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install application dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Validate canonical application source
+        run: npm run validate:source
+
+      - name: Install pinned screenshot runtime
+        run: |
+          npm install --no-save --package-lock=false playwright@1.55.0
+          npx playwright install --with-deps chromium
+
+      - name: Capture Android storefront screenshots
+        run: node scripts/generate-android-storefront-screenshots.mjs
+
+      - name: Verify screenshot inventory and dimensions
+        shell: bash
+        run: |
+          node - <<'NODE'
+          const fs = require("node:fs");
+          const path = require("node:path");
+          const root = "artifacts/android-storefront-screenshots";
+          const manifest = JSON.parse(fs.readFileSync(path.join(root, "manifest.json"), "utf8"));
+          if (manifest.dataset.temporary !== true || manifest.dataset.transactionCount !== 48) {
+            throw new Error("Screenshot data manifest is invalid.");
+          }
+          if (manifest.viewport.pixels.width !== 1080 || manifest.viewport.pixels.height !== 1920) {
+            throw new Error("Screenshots are not 1080x1920.");
+          }
+          for (const locale of ["en-US", "es-PR"]) {
+            const files = manifest.locales[locale] || [];
+            if (files.length !== 8) throw new Error(`${locale} must contain exactly eight screenshots.`);
+            for (const file of files) {
+              const target = path.join(root, locale, file.file);
+              if (!fs.existsSync(target) || fs.statSync(target).size !== file.bytes) {
+                throw new Error(`Screenshot verification failed: ${target}`);
+              }
+            }
+          }
+          NODE
+
+      - name: Upload Play Store screenshot packs
+        uses: actions/upload-artifact@v4
+        with:
+          name: grocery-benefits-android-storefront-screenshots
+          path: artifacts/android-storefront-screenshots
+          if-no-files-found: error
+          retention-days: 30

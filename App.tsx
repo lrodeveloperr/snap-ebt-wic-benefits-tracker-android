@@ -57,9 +57,7 @@ import type {
 } from "./src/removeAdsPurchase";
 
 const LOCAL_APP_ORIGIN = "https://snap-ebt-wic.local/";
-const AD_BANNER_HEIGHT = 50;
-const AD_RAIL_SEPARATOR_HEIGHT = 10;
-const AD_RAIL_HEIGHT = AD_BANNER_HEIGHT + AD_RAIL_SEPARATOR_HEIGHT;
+const AD_BANNER_MIN_HEIGHT = 50;
 const GOOGLE_DEMO_PUBLISHER_ID = "3940256099942544";
 const PLAY_BILLING_CONNECTION_RETRY_DELAYS_MS = [0, 1000, 3000] as const;
 const PLAY_BILLING_ENTITLEMENT_RETRY_DELAYS_MS = [0, 500, 2000] as const;
@@ -90,8 +88,8 @@ const ANDROID_NATIVE_LAYOUT_STYLE = String.raw`
 <style id="android-native-layout">
 html[data-native-platform="android"] {
   --radius: 16px;
-  --bottom: 56px;
-  --ad-nav-height: 56px;
+  --bottom: 52px;
+  --ad-nav-height: 52px;
   width: 100%;
   max-width: 100%;
   overflow-x: hidden;
@@ -110,14 +108,15 @@ html[data-native-platform="android"] .app-shell {
 html[data-native-platform="android"] .topbar {
   height: 56px;
   padding: 0 12px;
-  grid-template-columns: 44px minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) auto;
   background: #fff;
   border-bottom: 1px solid #dfe3e8;
   backdrop-filter: none;
   -webkit-backdrop-filter: none;
 }
 html[data-native-platform="android"] .topbar-title {
-  padding-left: 8px;
+  grid-column: 1;
+  padding-left: 4px;
   color: #202124;
   font-size: 20px;
   font-weight: 650;
@@ -132,12 +131,12 @@ html[data-native-platform="android"] .main {
   width: 100%;
   max-width: 720px;
   min-width: 0;
-  padding: 72px 16px 76px !important;
+  padding: 64px 16px 64px !important;
   margin: 0 auto;
 }
 html[data-native-platform="android"] .bottom-nav {
-  height: 56px;
-  padding: 4px 8px;
+  height: 52px;
+  padding: 2px 8px;
   background: #fff;
   border-top: 1px solid #dfe3e8;
   backdrop-filter: none;
@@ -149,6 +148,9 @@ html[data-native-platform="android"] .nav-btn {
   padding: 3px;
   gap: 2px;
   border-radius: 16px;
+}
+html[data-native-platform="android"] .topbar-actions {
+  grid-column: 2;
 }
 html[data-native-platform="android"] .nav-btn.active {
   color: #0b73d9;
@@ -443,7 +445,7 @@ const NATIVE_COPY = {
     scannerCancel: "Cancel",
     scannerTitle: "Scan barcode",
     scannerTargetA11y: "Place the barcode inside the frame",
-    scannerHint: "Place the UPC or EAN barcode inside the frame",
+    scannerHint: "Place a UPC-A, UPC-E, EAN-8, or EAN-13 barcode inside the frame",
   },
   "es-PR": {
     exportUnavailableTitle: "Exportación no disponible",
@@ -472,7 +474,7 @@ const NATIVE_COPY = {
     scannerCancel: "Cancelar",
     scannerTitle: "Escanear código de barras",
     scannerTargetA11y: "Coloca el código de barras dentro del marco",
-    scannerHint: "Coloca el código UPC o EAN dentro del marco",
+    scannerHint: "Coloca un código UPC-A, UPC-E, EAN-8 o EAN-13 dentro del marco",
   },
 } as const;
 
@@ -2181,7 +2183,7 @@ export default function App() {
   ]);
 
   const finishBarcodeScanner = useCallback(
-    (result: "complete" | "cancel", value?: string) => {
+    (result: "complete" | "cancel", value?: string, format?: string) => {
       if (
         !barcodeScannerOpenRef.current ||
         barcodeResultConsumedRef.current
@@ -2191,9 +2193,12 @@ export default function App() {
       barcodeResultConsumedRef.current = true;
       barcodeScannerOpenRef.current = false;
       setBarcodeScannerRequest(null);
-      const argument = result === "complete" ? JSON.stringify(value || "") : "";
+      const argumentsList =
+        result === "complete"
+          ? `${JSON.stringify(value || "")},${JSON.stringify(format || "")}`
+          : "";
       webViewRef.current?.injectJavaScript(`
-        window.GBTBarcodeScanner?.${result}(${argument});
+        window.GBTBarcodeScanner?.${result}(${argumentsList});
         true;
       `);
     },
@@ -2260,9 +2265,15 @@ export default function App() {
       ) {
         return;
       }
-      const value = String(result.data || "").trim();
-      if (!/^\d{8}$|^\d{12,14}$/.test(value)) return;
-      finishBarcodeScanner("complete", value);
+      const rawValue = String(result.raw || "").trim();
+      const displayValue = String(result.data || "").trim();
+      const value = /^\d+$/.test(rawValue) ? rawValue : displayValue;
+      const format = String(result.type || "").toLowerCase();
+      // Pass the symbology through to the web app even when the payload is
+      // malformed. UPC-E and EAN-8 are both eight digits and cannot be
+      // normalized correctly from the digits alone; the web layer validates
+      // the format, length, and GS1 check digit and reports the outcome.
+      finishBarcodeScanner("complete", value, format);
     },
     [finishBarcodeScanner],
   );
@@ -2473,7 +2484,7 @@ export default function App() {
             <BannerAd
               key={`banner-${bannerInstance}`}
               unitId={bannerUnitId}
-              size={BannerAdSize.BANNER}
+              size={BannerAdSize.ANCHORED_ADAPTIVE_BANNER}
               requestOptions={{ requestNonPersonalizedAdsOnly: true }}
               onAdLoaded={() => {
                 setAdLoadAttempt(0);
@@ -2562,14 +2573,13 @@ const styles = StyleSheet.create({
     backgroundColor: "#f2f2f7",
   },
   bannerRail: {
-    height: AD_RAIL_HEIGHT,
+    minHeight: AD_BANNER_MIN_HEIGHT,
     flexShrink: 0,
     alignItems: "center",
     justifyContent: "flex-end",
-    backgroundColor: "#f2f2f7",
+    backgroundColor: "#ffffff",
     borderTopColor: "#d1d1d6",
     borderTopWidth: StyleSheet.hairlineWidth,
-    paddingTop: AD_RAIL_SEPARATOR_HEIGHT,
     overflow: "hidden",
   },
   bannerHidden: {
