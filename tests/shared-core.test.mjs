@@ -989,3 +989,35 @@ test("Android resolves food barcodes locally and recovers ads when connectivity 
   assert.ok(nativeApp.includes('window.addEventListener("online"'));
   assert.ok(nativeApp.includes('case "network-online"'));
 });
+
+test("the revenue banner stays available and falls back to a native-purchase house promotion", () => {
+  assert.ok(html.includes("function adPlacementAllowed(){return state.route!=='removeAds';}"));
+  assert.ok(!html.includes("state.route!=='cards'&&state.route!=='removeAds'"));
+  assert.ok(html.includes("CRITICAL_AD_MODAL_KINDS.has(modalState)"));
+  assert.ok(html.includes('data-action="house-ad-purchase"'));
+  assert.ok(html.includes("if(purchaseRuntime.canPurchase)postPurchaseIntent('purchase-remove-ads')"));
+  assert.ok(html.includes("else setRoute('removeAds')"));
+  assert.ok(html.includes("effective===AD_STATE.AD_UNAVAILABLE"));
+  assert.ok(!html.includes("status===AD_CONSENT.REQUEST_BLOCKED&&adRuntime.mode===AD_MODE.REAL"));
+  assert.ok(html.includes("banner.classList.toggle('ad-mode-house',houseMode)"));
+  assert.ok(html.includes("'ads.houseTitle':'Make every shop ad-free'"));
+  assert.ok(!html.includes("'ads.houseTitle':'GoodUse"));
+  assert.ok(nativeApp.includes('const HOUSE_BANNER_HEIGHT = 58;'));
+  assert.ok(nativeApp.includes('? "AD_UNAVAILABLE"'));
+  assert.ok(nativeApp.includes('runtime.setRuntimeBannerHeight(${height})'));
+  assert.ok(nativeApp.includes('nativeAdState !== "failed"'));
+});
+
+test("legacy backup identities remain importable without resurfacing the old product name", () => {
+  const { remediation } = loadCoreWithRemediation();
+  const legacyFormat = ["snap", "ebt", "wic", "history"].join("-");
+  const legacyProduct = ["SNAP-EBT & WIC", "Benefits Tracker"].join(" ");
+  assert.equal(remediation.isAcceptedTransferFormat(legacyFormat), true);
+  assert.equal(remediation.isAcceptedProductName(legacyProduct), true);
+  assert.equal(
+    remediation.isAcceptedEncryptedTransferFormat(`${legacyFormat}-encrypted`),
+    true,
+  );
+  assert.ok(html.includes("esc(publicProductName(b.sourceProduct))"));
+  assert.ok(html.includes("esc(publicProductName(x.sourceProduct))"));
+});
