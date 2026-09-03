@@ -10,6 +10,7 @@ coverage/
 .DS_Store
 android/
 ios/
+assets/gbt-usda-upc-2026-04.db
 *.jks
 *.keystore
 *.p8

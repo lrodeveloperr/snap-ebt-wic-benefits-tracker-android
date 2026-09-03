@@ -7,6 +7,12 @@ import {
 } from "expo-camera";
 import * as Notifications from "expo-notifications";
 import * as Sharing from "expo-sharing";
+import {
+  deleteDatabaseAsync,
+  importDatabaseFromAssetAsync,
+  openDatabaseAsync,
+  type SQLiteDatabase,
+} from "expo-sqlite";
 import { StatusBar } from "expo-status-bar";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -69,6 +75,154 @@ const NOTIFICATION_OWNER = "snap-ebt-grocery-tracker:local-reminder:v1";
 const NOTIFICATION_IDENTIFIER_PREFIX = "gbt-local-reminder-v1:";
 const ANDROID_REMINDER_CHANNEL_ID = "gbt-local-reminders-v1";
 const MAX_OWNED_REMINDERS = 48;
+const USDA_UPC_DATABASE_NAME = "gbt-usda-upc-2026-04.db";
+const USDA_UPC_DATABASE_ASSET = require("./assets/gbt-usda-upc-2026-04.db");
+const USDA_UPC_SCHEMA_VERSION = "1";
+
+const USDA_UPC_CATEGORIES = [
+  "other",
+  "produce",
+  "protein",
+  "dairy",
+  "grains",
+  "pantry",
+  "frozen",
+  "beverages",
+  "prepared",
+  "snacks",
+  "baby",
+] as const;
+
+type BarcodeLookupRecord = {
+  name: string;
+  category: (typeof USDA_UPC_CATEGORIES)[number];
+  quantityUnit: "each";
+  source: "USDA_FOODDATA_CENTRAL";
+};
+
+type BarcodeLookupRow = {
+  name: string;
+  category: string;
+};
+
+let bundledBarcodeDatabasePromise: Promise<SQLiteDatabase | null> | null = null;
+
+function barcodeCheckDigit(body: string) {
+  if (!/^\d+$/.test(body)) return "";
+  let sum = 0;
+  let weight = 3;
+  for (let index = body.length - 1; index >= 0; index -= 1) {
+    sum += Number(body[index]) * weight;
+    weight = weight === 3 ? 1 : 3;
+  }
+  return String((10 - (sum % 10)) % 10);
+}
+
+function expandUpcE(code: string) {
+  if (!/^\d{8}$/.test(code)) return code;
+  const numberSystem = code[0] || "";
+  const payload = code.slice(1, 7);
+  const check = code[7] || "";
+  const last = payload[5] || "";
+  let body: string;
+  if (["0", "1", "2"].includes(last)) {
+    body =
+      numberSystem +
+      payload.slice(0, 2) +
+      last +
+      "0000" +
+      payload.slice(2, 5);
+  } else if (last === "3") {
+    body =
+      numberSystem + payload.slice(0, 3) + "00000" + payload.slice(3, 5);
+  } else if (last === "4") {
+    body = numberSystem + payload.slice(0, 4) + "00000" + payload[4];
+  } else {
+    body = numberSystem + payload.slice(0, 5) + "0000" + last;
+  }
+  return body + check;
+}
+
+export function normalizeProductBarcode(value: string, type?: string) {
+  let code = String(value || "").replace(/\D/g, "");
+  if (![8, 12, 13, 14].includes(code.length) || /^0+$/.test(code)) return "";
+  if (barcodeCheckDigit(code.slice(0, -1)) !== code.at(-1)) return "";
+  // EAN-8 and UPC-E both contain eight digits but encode different values.
+  // Expo supplies the symbology, so only a confirmed UPC-E is expanded.
+  if (code.length === 8 && type === "upc_e") code = expandUpcE(code);
+  return code.padStart(14, "0");
+}
+
+async function openBundledBarcodeDatabase() {
+  if (bundledBarcodeDatabasePromise) return bundledBarcodeDatabasePromise;
+  bundledBarcodeDatabasePromise = (async () => {
+    const importAsset = (forceOverwrite: boolean) =>
+      importDatabaseFromAssetAsync(USDA_UPC_DATABASE_NAME, {
+        assetId: USDA_UPC_DATABASE_ASSET,
+        forceOverwrite,
+      });
+    const openValidated = async () => {
+      const database = await openDatabaseAsync(USDA_UPC_DATABASE_NAME);
+      const schema = await database.getFirstAsync<{ value: string }>(
+        "SELECT value FROM metadata WHERE key = 'schema_version'",
+      );
+      const eligibilityAuthority = await database.getFirstAsync<{ value: string }>(
+        "SELECT value FROM metadata WHERE key = 'eligibility_authority'",
+      );
+      if (
+        schema?.value !== USDA_UPC_SCHEMA_VERSION ||
+        eligibilityAuthority?.value !== "none"
+      ) {
+        await database.closeAsync();
+        throw new Error("Bundled USDA UPC database schema is not supported");
+      }
+      return database;
+    };
+
+    await importAsset(false);
+    try {
+      return await openValidated();
+    } catch (firstError) {
+      // This index contains no user data. Repair only this app-owned database.
+      console.warn("Repairing bundled USDA UPC database", firstError);
+      await deleteDatabaseAsync(USDA_UPC_DATABASE_NAME);
+      await importAsset(true);
+      return openValidated();
+    }
+  })().catch((error) => {
+    console.warn("Bundled USDA UPC database unavailable", error);
+    return null;
+  });
+  return bundledBarcodeDatabasePromise;
+}
+
+async function lookupBundledBarcode(
+  normalizedGtin: string,
+): Promise<BarcodeLookupRecord | null> {
+  if (!normalizedGtin) return null;
+  const database = await openBundledBarcodeDatabase();
+  if (!database) return null;
+  const row = await database.getFirstAsync<BarcodeLookupRow>(
+    `SELECT products.name AS name, categories.name AS category
+       FROM products
+       JOIN categories ON categories.id = products.category
+      WHERE products.gtin = ?
+      LIMIT 1`,
+    Number(normalizedGtin),
+  );
+  if (!row?.name) return null;
+  const category = USDA_UPC_CATEGORIES.includes(
+    row.category as (typeof USDA_UPC_CATEGORIES)[number],
+  )
+    ? (row.category as (typeof USDA_UPC_CATEGORIES)[number])
+    : "other";
+  return {
+    name: row.name,
+    category,
+    quantityUnit: "each",
+    source: "USDA_FOODDATA_CENTRAL",
+  };
+}
 
 const ANDROID_COPY_REPLACEMENTS = [
   ["iOS Web App", "Android App"],
@@ -381,6 +535,7 @@ const NativeWebView = PackageWebView as unknown as React.ForwardRefExoticCompone
 
 type BridgeMessage =
   | { type: "bridge-ready" }
+  | { type: "network-online" }
   | { type: "android-back-result"; handled?: boolean }
   | { type: "legal-ready"; ready: boolean; locale?: string }
   | { type: "ad-eligibility"; eligible: boolean }
@@ -779,6 +934,9 @@ const NATIVE_BRIDGE_SCRIPT = String.raw`
     }
   };
   window.addEventListener("gbt-ad-presentation-change", publishAdPresentation);
+  window.addEventListener("online", function () {
+    post({ type: "network-online" });
+  });
   window.setInterval(publishAdPresentation, 250);
   publishAdPresentation();
 
@@ -1188,6 +1346,8 @@ export default function App() {
   const bannerUnitId = adProfileConfigured ? productionBannerId : "";
 
   useEffect(() => {
+    // Warm the local food-only UPC index before the first shopping scan.
+    void openBundledBarcodeDatabase();
     try {
       purgeShareCacheRoot();
     } catch (error) {
@@ -2181,19 +2341,26 @@ export default function App() {
   ]);
 
   const finishBarcodeScanner = useCallback(
-    (result: "complete" | "cancel", value?: string) => {
+    (
+      result: "complete" | "cancel",
+      value?: string,
+      record?: BarcodeLookupRecord | null,
+    ) => {
       if (
         !barcodeScannerOpenRef.current ||
-        barcodeResultConsumedRef.current
+        (result === "complete" && barcodeResultConsumedRef.current)
       ) {
         return;
       }
       barcodeResultConsumedRef.current = true;
       barcodeScannerOpenRef.current = false;
       setBarcodeScannerRequest(null);
-      const argument = result === "complete" ? JSON.stringify(value || "") : "";
+      const argumentsList =
+        result === "complete"
+          ? `${JSON.stringify(value || "")},${JSON.stringify(record || null)}`
+          : "";
       webViewRef.current?.injectJavaScript(`
-        window.GBTBarcodeScanner?.${result}(${argument});
+        window.GBTBarcodeScanner?.${result}(${argumentsList});
         true;
       `);
     },
@@ -2260,9 +2427,20 @@ export default function App() {
       ) {
         return;
       }
-      const value = String(result.data || "").trim();
-      if (!/^\d{8}$|^\d{12,14}$/.test(value)) return;
-      finishBarcodeScanner("complete", value);
+      const value = normalizeProductBarcode(result.data, result.type);
+      if (!value) return;
+      // Block duplicate callbacks while the exact-key local lookup is running.
+      barcodeResultConsumedRef.current = true;
+      void lookupBundledBarcode(value)
+        .catch((error) => {
+          console.warn("USDA UPC lookup failed", error);
+          return null;
+        })
+        .then((record) => {
+          if (!barcodeScannerOpenRef.current) return;
+          barcodeResultConsumedRef.current = false;
+          finishBarcodeScanner("complete", value, record);
+        });
     },
     [finishBarcodeScanner],
   );
@@ -2297,6 +2475,13 @@ export default function App() {
         case "bridge-ready":
           androidBackRequestAtRef.current = 0;
           setWebReady(true);
+          break;
+        case "network-online":
+          if (nativeAdState === "failed") {
+            setAdLoadAttempt(0);
+            setBannerInstance((instance) => instance + 1);
+            setNativeAdState("loading");
+          }
           break;
         case "android-back-result":
           androidBackRequestAtRef.current = 0;
@@ -2340,7 +2525,7 @@ export default function App() {
           break;
       }
     },
-    [beginRemoveAdsPurchase, beginRemoveAdsRestore, clearNativeAppData, legalReady, openBarcodeScanner, privacyChoicesRequired, reconcileNotifications, shareFile, shareText, showPrivacyChoices],
+    [beginRemoveAdsPurchase, beginRemoveAdsRestore, clearNativeAppData, legalReady, nativeAdState, openBarcodeScanner, privacyChoicesRequired, reconcileNotifications, shareFile, shareText, showPrivacyChoices],
   );
 
   useEffect(() => {
@@ -2412,7 +2597,9 @@ export default function App() {
     adEligible &&
     (nativeAdState !== "failed" || adLoadAttempt < 2);
   const bannerMounted =
-    showBanner && webAdState !== "AD_TEMPORARILY_HIDDEN";
+    showBanner &&
+    webAdState !== "AD_TEMPORARILY_HIDDEN" &&
+    !barcodeScannerRequest;
   const bannerVisible =
     bannerMounted &&
     nativeAdState === "loaded" &&
