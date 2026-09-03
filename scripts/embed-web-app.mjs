@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { readFile, writeFile } from "node:fs/promises";
+import { readFile, readdir, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 const productionWorkflowPath = ".github/workflows/android-production-aab.yml";
@@ -69,13 +69,41 @@ const embeddedHtml = canonicalHtml.replace(
   `data:image/png;base64,${brandLogo.toString("base64")}`,
 );
 const digest = createHash("sha256").update(canonicalHtml).digest("hex");
+const outputPath = path.resolve(output);
+const outputDirectory = path.dirname(outputPath);
+const outputBaseName = path.basename(outputPath, path.extname(outputPath));
+const embeddedParts = embeddedHtml.match(/[\s\S]{1,400000}/g) || [""];
+const oldPartNames = (await readdir(outputDirectory)).filter(
+  (name) => name.startsWith(`${outputBaseName}.part`) && name.endsWith(".ts"),
+);
+await Promise.all(
+  oldPartNames.map((name) => unlink(path.join(outputDirectory, name))),
+);
+await Promise.all(
+  embeddedParts.map((part, index) =>
+    writeFile(
+      path.join(outputDirectory, `${outputBaseName}.part${index}.ts`),
+      [
+        "// Generated from the reviewed canonical HTML source. Do not edit by hand.",
+        `const APP_HTML_PART = ${JSON.stringify(part)};`,
+        "export default APP_HTML_PART;",
+        "",
+      ].join("\n"),
+      "utf8",
+    ),
+  ),
+);
 const moduleSource = [
   "// Generated from the reviewed canonical HTML source. Do not edit by hand.",
+  ...embeddedParts.map(
+    (_part, index) =>
+      `import APP_HTML_PART_${index} from "./${outputBaseName}.part${index}";`,
+  ),
   `export const APP_HTML_SHA256 = ${JSON.stringify(digest)};`,
-  `const APP_HTML = ${JSON.stringify(embeddedHtml)};`,
+  `const APP_HTML = [${embeddedParts.map((_part, index) => `APP_HTML_PART_${index}`).join(", ")}].join("");`,
   "export default APP_HTML;",
   "",
 ].join("\n");
 
-await writeFile(path.resolve(output), moduleSource, "utf8");
+await writeFile(outputPath, moduleSource, "utf8");
 console.log(`Embedded canonical HTML and brand logo: ${digest}`);

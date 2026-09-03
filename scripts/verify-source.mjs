@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { readFile, stat } from "node:fs/promises";
+import { readFile, readdir, stat } from "node:fs/promises";
 import vm from "node:vm";
 
 const APPROVED_ICON_SHA256 =
@@ -270,10 +270,20 @@ for (const path of ["assets/android-icon-foreground.png", "assets/android-icon-m
 }
 
 const generated = await read("src/appHtml.ts");
+const generatedParts = (
+  await Promise.all(
+    (await readdir("src"))
+      .filter((name) => /^appHtml\.part\d+\.ts$/.test(name))
+      .sort((left, right) =>
+        Number(left.match(/\d+/)?.[0]) - Number(right.match(/\d+/)?.[0]),
+      )
+      .map((name) => read(`src/${name}`)),
+  )
+).join("\n");
 const expectedHtmlDigest = sha256(Buffer.from(html));
 mustContain(generated, `APP_HTML_SHA256 = \"${expectedHtmlDigest}\"`, "embedded HTML digest");
-mustContain(generated, "data:image/png;base64,", "embedded reviewed logo");
-mustNotContain(generated, "assets/brand-logo-ui.png", "unembedded logo path");
+mustContain(generatedParts, "data:image/png;base64,", "embedded reviewed logo");
+mustNotContain(generatedParts, "assets/brand-logo-ui.png", "unembedded logo path");
 
 mustContain(provenance, "03d1dd013f215938b82ca1601c88301c9d5ed518", "source commit provenance");
 mustContain(provenance, "23d938c18df0e185e54946759a3075ef42ce2a6cbc3a0bff99b3a085387e4fcd", "source archive provenance");
