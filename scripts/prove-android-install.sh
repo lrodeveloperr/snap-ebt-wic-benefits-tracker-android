@@ -27,13 +27,16 @@ adb shell dumpsys package "$package_name" \
 
 adb shell am force-stop "$package_name"
 adb logcat -c
-launch_output="$(adb shell am start -W \
-  -a android.intent.action.MAIN \
+set +e
+launch_output="$(adb shell monkey \
+  -p "$package_name" \
   -c android.intent.category.LAUNCHER \
-  -p "$package_name" | tr -d '\r')"
+  1 2>&1 | tr -d '\r')"
+launch_status=$?
+set -e
 printf '%s\n' "$launch_output"
-if ! grep -Fq "Status: ok" <<< "$launch_output"; then
-  echo "Android did not report a successful QA activity launch." >&2
+if ! grep -Eq 'Events injected:[[:space:]]*1' <<< "$launch_output"; then
+  echo "Android did not inject a QA launcher event (monkey status $launch_status)." >&2
   adb logcat -d -t 300 >&2
   exit 1
 fi
