@@ -64,7 +64,7 @@ jobs:
           const pkg = require("./package.json");
           const lock = require("./package-lock.json");
           const expected = {
-            expo: "57.0.9",
+            expo: "57.0.20",
             "react-native": "0.86.2",
             "react-native-webview": "14.0.1",
             "react-native-google-mobile-ads": "16.3.4",
@@ -78,7 +78,7 @@ jobs:
               `${name} must stay locked to ${version}`,
             );
           }
-          assert.equal(pkg.dependencies.expo, "~57.0.9");
+          assert.equal(pkg.dependencies.expo, "~57.0.20");
           assert.equal(pkg.dependencies["react-native"], "0.86.2");
           const adsPackage = require("./node_modules/react-native-google-mobile-ads/package.json");
           assert.equal(adsPackage.sdkVersions.android.googleMobileAds, "25.0.0");
