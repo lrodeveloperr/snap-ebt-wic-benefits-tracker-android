@@ -27,7 +27,16 @@ adb shell dumpsys package "$package_name" \
 
 adb shell am force-stop "$package_name"
 adb logcat -c
-adb shell monkey -p "$package_name" -c android.intent.category.LAUNCHER 1
+launch_output="$(adb shell am start -W \
+  -a android.intent.action.MAIN \
+  -c android.intent.category.LAUNCHER \
+  -p "$package_name" | tr -d '\r')"
+printf '%s\n' "$launch_output"
+if ! grep -Fq "Status: ok" <<< "$launch_output"; then
+  echo "Android did not report a successful QA activity launch." >&2
+  adb logcat -d -t 300 >&2
+  exit 1
+fi
 
 app_pid=""
 for _attempt in {1..20}; do
