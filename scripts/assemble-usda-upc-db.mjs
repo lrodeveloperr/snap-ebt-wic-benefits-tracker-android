@@ -8,6 +8,7 @@ import {
   rmSync,
   statSync,
 } from "node:fs";
+import { once } from "node:events";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -40,13 +41,10 @@ async function isExpectedDatabase(path) {
 }
 
 async function appendPart(part, output) {
-  await new Promise((resolveCopy, reject) => {
-    const input = createReadStream(part);
-    input.on("error", reject);
-    output.on("error", reject);
-    input.on("end", resolveCopy);
-    input.pipe(output, { end: false });
-  });
+  const input = createReadStream(part);
+  for await (const chunk of input) {
+    if (!output.write(chunk)) await once(output, "drain");
+  }
 }
 
 async function assemble() {
@@ -70,10 +68,9 @@ async function assemble() {
 
   try {
     for (const part of parts) await appendPart(join(PARTS_DIR, part), output);
-    await new Promise((resolveClose, reject) => {
-      output.on("error", reject);
-      output.end(resolveClose);
-    });
+    const finished = once(output, "finish");
+    output.end();
+    await finished;
     if (!(await isExpectedDatabase(temporary))) {
       throw new Error("Assembled USDA database failed its size or SHA-256 check.");
     }

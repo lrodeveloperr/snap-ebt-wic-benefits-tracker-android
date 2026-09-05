@@ -166,6 +166,143 @@ test("money and quantity calculations stay exact in cents", () => {
   );
 });
 
+test("unsafe or malformed item totals are rejected instead of rounded", () => {
+  const core = loadCore();
+  for (const item of [
+    { priceKnown: true, unitPriceCents: Number.MAX_SAFE_INTEGER, quantity: 2, quantityRaw: "2" },
+    { priceKnown: true, unitPriceCents: "199", quantity: 1, quantityRaw: "1" },
+    { priceKnown: true, unitPriceCents: 199, quantity: Number.MAX_VALUE, quantityRaw: "1e309" },
+    { priceKnown: true, priceEntryMode: "LINE_TOTAL", lineTotalCents: Number.MAX_VALUE },
+  ]) {
+    assert.equal(core.itemTotalCents(item), null);
+  }
+});
+
+test("prototype-like SNAP identifiers preserve exact ledger arithmetic", () => {
+  const core = loadCore();
+  for (const cardId of ["__proto__", "constructor", "toString", "hasOwnProperty"]) {
+    const state = core.canonicalState();
+    state.settings.enabledPrograms = ["SNAP"];
+    state.snapCards = [{ id: cardId, active: true, balance: 1_000, startingBalance: 1_000, transactions: [], reminder: core.normalizeReminder(null) }];
+    state.basket.items = [{ id: `item-${cardId}`, name: "Food", quantity: 1, quantityRaw: "1", unitPriceCents: 250, priceKnown: true, snapEligibility: "ELIGIBLE", funding: { mode: "SNAP", snapCardId: cardId } }];
+    const validation = core.validateBasketForCheckout(state, state.basket, core.isoDate());
+    assert.deepEqual(Array.from(validation.blockers), []);
+    const checkedOut = core.applyCheckoutTransaction(state, validation);
+    assert.equal(checkedOut.state.snapCards[0].balance, 750);
+  }
+});
+
+test("duplicate basket row identifiers are blocked before ledger mutation", () => {
+  const core = loadCore();
+  const state = core.canonicalState();
+  addSnapCard(core, state, 10_000);
+  const item = { id: "duplicate", name: "Food", quantity: 1, quantityRaw: "1", unitPriceCents: 500, priceKnown: true, snapEligibility: "ELIGIBLE", funding: { mode: "SNAP", snapCardId: "snap-1" } };
+  state.basket.items = [item, { ...item, unitPriceCents: 700 }];
+  const validation = core.validateBasketForCheckout(state, state.basket, core.isoDate());
+  assert.ok(validation.blockers.some((issue) => issue.reason === "DUPLICATE_ITEM_ID"));
+  assert.equal(validation.plan, null);
+  assert.equal(state.snapCards[0].balance, 10_000);
+});
+
+test("WIC card and allowance identifiers may safely contain delimiters", () => {
+  const core = loadCore();
+  const state = makeWicState(core, { allowanceUnit: "dozen", remaining: 3 });
+  state.wicCards[0].id = "wic::card";
+  state.wicCards[0].allowances[0].id = "allowance::eggs";
+  const item = wicItem({ quantity: 1, wicQuantity: 1 });
+  item.funding.wicCardId = "wic::card";
+  item.funding.allowanceId = "allowance::eggs";
+  state.basket.items = [item];
+  const validation = core.validateBasketForCheckout(state, state.basket, "2026-08-12");
+  assert.deepEqual(Array.from(validation.blockers), []);
+  const checkedOut = core.applyCheckoutTransaction(state, validation, { transactionDate: "2026-08-12" });
+  assert.equal(checkedOut.state.wicCards[0].allowances[0].remaining, 2);
+  const voided = core.voidHistoryTransaction(checkedOut.state, checkedOut.record.id);
+  assert.equal(voided.wicCards[0].allowances[0].remaining, 3);
+});
+
+test("state normalization repairs invalid dates, numerics, and duplicate identifiers", () => {
+  const core = loadCore();
+  const state = core.canonicalState();
+  state.cash.start = "2026-02-30";
+  state.cash.end = "2026-13-99";
+  state.cash.periodBudget = "not-money";
+  state.snapCards = [
+    { id: "same", balance: "bad", startingBalance: 10, transactions: [] },
+    { id: "same", balance: Number.MAX_VALUE, startingBalance: 10, transactions: [] },
+  ];
+  const normalized = core.normalizeState(state);
+  assert.match(normalized.cash.start, /^\d{4}-\d{2}-\d{2}$/);
+  assert.ok(normalized.cash.end >= normalized.cash.start);
+  assert.equal(normalized.cash.periodBudget, 0);
+  assert.notEqual(normalized.snapCards[0].id, normalized.snapCards[1].id);
+  assert.equal(normalized.snapCards[0].balance, 0);
+  assert.equal(normalized.snapCards[1].balance, 0);
+});
+
+test("state normalization survives a deterministic malformed-data stress corpus", () => {
+  const core = loadCore();
+  let seed = 0x5eed1234;
+  const random = () => ((seed = (seed * 1664525 + 1013904223) >>> 0) / 0x100000000);
+  const atoms = [null, undefined, true, false, 0, -1, Number.MAX_VALUE, Number.MAX_SAFE_INTEGER + 1, NaN, Infinity, "", "bad", "2026-02-30", "__proto__"];
+  const value = (depth = 0) => {
+    if (depth > 2 || random() < 0.45) return atoms[Math.floor(random() * atoms.length)];
+    if (random() < 0.5) return Array.from({ length: Math.floor(random() * 5) }, () => value(depth + 1));
+    const out = {};
+    for (const key of ["id", "name", "date", "start", "end", "items", "transactions", "allowances", "funding", "split", "amountCents"]) {
+      if (random() < 0.45) out[key] = value(depth + 1);
+    }
+    return out;
+  };
+  const assertFinite = (input, path = "state") => {
+    if (typeof input === "number") assert.ok(Number.isFinite(input), `${path} must be finite`);
+    if (input && typeof input === "object") for (const [key, child] of Object.entries(input)) assertFinite(child, `${path}.${key}`);
+  };
+  for (let index = 0; index < 750; index += 1) {
+    const candidate = random() < 0.2 ? value() : {
+      ...core.canonicalState(),
+      route: value(), settings: value(), snapCards: value(), wicCards: value(), cash: value(),
+      basket: value(), savedBaskets: value(), history: value(), recentStores: value(),
+      recentItems: value(), barcodeMappings: value(), importBatches: value(),
+    };
+    const normalized = core.normalizeState(candidate);
+    assert.ok(normalized && typeof normalized === "object" && !Array.isArray(normalized));
+    for (const key of ["snapCards", "wicCards", "savedBaskets", "history", "recentStores", "recentItems", "importBatches"]) assert.ok(Array.isArray(normalized[key]));
+    assert.ok(normalized.cash && typeof normalized.cash === "object" && !Array.isArray(normalized.cash));
+    assertFinite(normalized, `case[${index}]`);
+    assert.equal(JSON.stringify(core.normalizeState(normalized)), JSON.stringify(normalized));
+  }
+});
+
+test("cash catch-up advances beyond the former 120-period limit", () => {
+  const core = loadCore();
+  const state = core.canonicalState();
+  state.cash = core.makeCashPeriod({ baseBudget: 0, start: "2000-01-01", cycle: "weekly" });
+  const result = core.processExpiredCashPeriod(state, "2026-09-05");
+  assert.equal(result.pending, false);
+  assert.ok(result.state.cash.end >= "2026-09-05");
+});
+
+test("native barcode normalization executes against representative UPC and EAN data", () => {
+  const start = nativeApp.indexOf("function barcodeCheckDigit");
+  const end = nativeApp.indexOf("async function openBundledBarcodeDatabase", start);
+  assert.ok(start >= 0 && end > start);
+  const source = nativeApp
+    .slice(start, end)
+    .replace("export function normalizeProductBarcode", "function normalizeProductBarcode")
+    .replace("type?: string", "type")
+    .replaceAll(": string", "");
+  const context = {};
+  vm.runInNewContext(`${source};globalThis.normalizeProductBarcode=normalizeProductBarcode;`, context);
+  assert.equal(context.normalizeProductBarcode("036000291452", "upc_a"), "00036000291452");
+  assert.equal(context.normalizeProductBarcode("4006381333931", "ean13"), "04006381333931");
+  assert.equal(context.normalizeProductBarcode("96385074", "ean8"), "00000096385074");
+  assert.equal(context.normalizeProductBarcode("04252614", "upc_e"), "00042100005264");
+  for (const invalid of ["", "00000000", "036000291453", "abc036000291452", "0360-0029-1452"]) {
+    assert.equal(context.normalizeProductBarcode(invalid, "upc_a"), "");
+  }
+});
+
 test("checkout validates then atomically updates a SNAP ledger", () => {
   const core = loadCore();
   const state = core.canonicalState();
@@ -984,7 +1121,9 @@ test("reviewed UI safeguards remain wired into the canonical source", () => {
 
 test("Android resolves food barcodes locally and recovers ads when connectivity returns", () => {
   assert.ok(nativeApp.includes("normalizeProductBarcode(result.data, result.type)"));
-  assert.ok(nativeApp.includes("lookupBundledBarcode(value)"));
+  assert.ok(nativeApp.includes("lookupBarcodeWithTimeout(value)"));
+  assert.ok(nativeApp.includes("BARCODE_LOOKUP_TIMEOUT_MS"));
+  assert.ok(nativeApp.includes("bundledBarcodeDatabasePromise = null"));
   assert.ok(nativeApp.includes('source: "USDA_FOODDATA_CENTRAL"'));
   assert.ok(nativeApp.includes('window.addEventListener("online"'));
   assert.ok(nativeApp.includes('case "network-online"'));

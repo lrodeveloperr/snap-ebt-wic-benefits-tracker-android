@@ -79,6 +79,7 @@ const MAX_OWNED_REMINDERS = 48;
 const USDA_UPC_DATABASE_NAME = "gbt-usda-upc-2026-04.db";
 const USDA_UPC_DATABASE_ASSET = require("./assets/gbt-usda-upc-2026-04.db");
 const USDA_UPC_SCHEMA_VERSION = "1";
+const BARCODE_LOOKUP_TIMEOUT_MS = 5_000;
 
 const USDA_UPC_CATEGORIES = [
   "other",
@@ -145,18 +146,24 @@ function expandUpcE(code: string) {
 }
 
 export function normalizeProductBarcode(value: string, type?: string) {
-  let code = String(value || "").replace(/\D/g, "");
+  let code = String(value || "").trim();
+  if (!/^\d+$/.test(code)) return "";
   if (![8, 12, 13, 14].includes(code.length) || /^0+$/.test(code)) return "";
-  if (barcodeCheckDigit(code.slice(0, -1)) !== code.at(-1)) return "";
   // EAN-8 and UPC-E both contain eight digits but encode different values.
   // Expo supplies the symbology, so only a confirmed UPC-E is expanded.
-  if (code.length === 8 && type === "upc_e") code = expandUpcE(code);
+  if (code.length === 8 && type === "upc_e") {
+    const expanded = expandUpcE(code);
+    if (barcodeCheckDigit(expanded.slice(0, -1)) !== expanded.at(-1)) return "";
+    code = expanded;
+  } else if (barcodeCheckDigit(code.slice(0, -1)) !== code.at(-1)) {
+    return "";
+  }
   return code.padStart(14, "0");
 }
 
 async function openBundledBarcodeDatabase() {
   if (bundledBarcodeDatabasePromise) return bundledBarcodeDatabasePromise;
-  bundledBarcodeDatabasePromise = (async () => {
+  const opening = (async () => {
     const importAsset = (forceOverwrite: boolean) =>
       importDatabaseFromAssetAsync(USDA_UPC_DATABASE_NAME, {
         assetId: USDA_UPC_DATABASE_ASSET,
@@ -190,11 +197,33 @@ async function openBundledBarcodeDatabase() {
       await importAsset(true);
       return openValidated();
     }
-  })().catch((error) => {
+  })();
+  bundledBarcodeDatabasePromise = opening;
+  try {
+    return await opening;
+  } catch (error) {
     console.warn("Bundled USDA UPC database unavailable", error);
+    if (bundledBarcodeDatabasePromise === opening) {
+      bundledBarcodeDatabasePromise = null;
+    }
+    return null;
+  }
+}
+
+async function lookupBarcodeWithTimeout(normalizedGtin: string) {
+  let timeout: ReturnType<typeof setTimeout> | null = null;
+  const lookup = lookupBundledBarcode(normalizedGtin).catch((error) => {
+    console.warn("USDA UPC lookup failed", error);
     return null;
   });
-  return bundledBarcodeDatabasePromise;
+  const timedOut = new Promise<null>((resolve) => {
+    timeout = setTimeout(() => resolve(null), BARCODE_LOOKUP_TIMEOUT_MS);
+  });
+  try {
+    return await Promise.race([lookup, timedOut]);
+  } finally {
+    if (timeout) clearTimeout(timeout);
+  }
 }
 
 async function lookupBundledBarcode(
@@ -2377,6 +2406,15 @@ export default function App() {
     finishBarcodeScanner("cancel");
   }, [finishBarcodeScanner]);
 
+  useEffect(() => {
+    const subscription = AppState.addEventListener("change", (nextState) => {
+      if (nextState !== "active" && barcodeScannerOpenRef.current) {
+        cancelBarcodeScanner();
+      }
+    });
+    return () => subscription.remove();
+  }, [cancelBarcodeScanner]);
+
   const openBarcodeScanner = useCallback(
     async (message: Extract<BridgeMessage, { type: "open-barcode-scanner" }>) => {
       if (barcodeScannerOpenRef.current) return;
@@ -2437,16 +2475,11 @@ export default function App() {
       if (!value) return;
       // Block duplicate callbacks while the exact-key local lookup is running.
       barcodeResultConsumedRef.current = true;
-      void lookupBundledBarcode(value)
-        .catch((error) => {
-          console.warn("USDA UPC lookup failed", error);
-          return null;
-        })
-        .then((record) => {
-          if (!barcodeScannerOpenRef.current) return;
-          barcodeResultConsumedRef.current = false;
-          finishBarcodeScanner("complete", value, record);
-        });
+      void lookupBarcodeWithTimeout(value).then((record) => {
+        if (!barcodeScannerOpenRef.current) return;
+        barcodeResultConsumedRef.current = false;
+        finishBarcodeScanner("complete", value, record);
+      });
     },
     [finishBarcodeScanner],
   );

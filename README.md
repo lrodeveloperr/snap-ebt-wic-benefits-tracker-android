@@ -14,7 +14,7 @@ The app keeps grocery planning data on the device, supports SNAP/EBT and Puerto 
 | Purchases | Google Play Billing non-consumable | Real Google Play Billing code; Play-track build required for billing QA |
 | SDK | compile/target 36, minimum 24 | compile/target 36, minimum 24 |
 
-Hermes and React Native's New Architecture are enabled. Android backup is disabled and unneeded sensitive permissions are blocked in `app.json`.
+Hermes and React Native's New Architecture use Expo's supported defaults. Android platform backup is enabled for recovery, while unneeded sensitive permissions remain blocked in `app.json`.
 
 The ads wrapper is locked to `react-native-google-mobile-ads` 16.3.4, whose published Android dependency pair is Google Mobile Ads 25.0.0 and UMP 4.0.0. This avoids the Kotlin 2.3 metadata introduced by the wrapper's 25.4.0 dependency while retaining a normal, upstream-published package. Source and CI validation fail if the wrapper or native SDK pair drifts.
 
@@ -28,7 +28,7 @@ Run **Actions > Android QA APK > Run workflow**. An authorized push to `main` al
 4. generates and verifies the Android project with Expo prebuild;
 5. realigns and signs the release APK with a fresh SHA-256 QA certificate and APK signature schemes v1, v2, and v3;
 6. verifies the signature, 16 KiB alignment, package name, target SDK, and SHA-256 checksum;
-7. installs the final APK on a clean Android 15 emulator; and
+7. installs and launches the final APK on a clean Android 15 emulator, failing on fatal startup logs; and
 8. uploads `snap-ebt-wic-benefits-tracker-qa-<run-number>` for 14 days.
 
 Download the artifact, unzip it, and install it on a test device:

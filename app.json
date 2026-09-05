@@ -3,8 +3,6 @@
     "name": "Grocery Benefits Tracker",
     "slug": "snap-ebt-wic-benefits-tracker-android",
     "version": "1.0.0",
-    "newArchEnabled": true,
-    "jsEngine": "hermes",
     "platforms": [
       "android"
     ],
@@ -60,7 +58,7 @@
     "android": {
       "package": "com.lateefrazaqoyetola.snapebtwictracker",
       "versionCode": 1,
-      "allowBackup": false,
+      "allowBackup": true,
       "permissions": [
         "android.permission.INTERNET",
         "android.permission.ACCESS_NETWORK_STATE",

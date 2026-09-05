@@ -32,7 +32,7 @@ assert.match(appGradle, new RegExp(`applicationId ["']${escapedPackage}["']`));
 assert.match(appGradle, new RegExp(`versionCode\\s+${expectedVersionCode}\\b`));
 assert.match(nativeSource, /compileSdkVersion\s*(?:=\s*)?36\b|compileSdk\s*(?:=\s*)?36\b/);
 assert.match(nativeSource, /targetSdkVersion\s*(?:=\s*)?36\b|targetSdk\s*(?:=\s*)?36\b/);
-assert.match(manifest, /android:allowBackup="false"/);
+assert.match(manifest, /android:allowBackup="true"/);
 assert.match(manifest, /android\.permission\.INTERNET/);
 assert.match(manifest, /android\.permission\.ACCESS_NETWORK_STATE/);
 assert.match(manifest, /android\.permission\.POST_NOTIFICATIONS/);

@@ -205,7 +205,7 @@ mustContain(app, "GBTBarcodeScanner?.${result}", "barcode result callback");
 assert.equal(appJson.expo.name, "Grocery Benefits Tracker");
 assert.deepEqual(appJson.expo.platforms, ["android"]);
 assert.equal(appJson.expo.android.package, PACKAGE);
-assert.equal(appJson.expo.android.allowBackup, false);
+assert.equal(appJson.expo.android.allowBackup, true);
 assert.ok(appJson.expo.android.permissions.includes("android.permission.POST_NOTIFICATIONS"));
 assert.ok(appJson.expo.android.permissions.includes("android.permission.CAMERA"));
 assert.ok(!appJson.expo.android.blockedPermissions.includes("android.permission.CAMERA"));
@@ -237,7 +237,7 @@ mustContain(installProof, "adb install --no-streaming -r", "APK PackageManager i
 mustContain(installProof, 'grep -F "versionCode=${ANDROID_VERSION_CODE}"', "installed version proof");
 assert.ok(
   qaWorkflow.indexOf("- name: Upload QA APK") <
-    qaWorkflow.indexOf("- name: Prove APK installs on Android 15"),
+    qaWorkflow.indexOf("- name: Prove APK installs and launches on Android 15"),
   "validated APK must be preserved before emulator infrastructure runs",
 );
 mustContain(productionWorkflow, "workflow_dispatch:", "manual production release trigger");

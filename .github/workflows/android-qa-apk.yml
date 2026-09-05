@@ -306,7 +306,7 @@ jobs:
             echo "KVM is unavailable; the emulator runner will use its safe fallback."
           fi
 
-      - name: Prove APK installs on Android 15
+      - name: Prove APK installs and launches on Android 15
         timeout-minutes: 15
         uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d
         with:
@@ -319,5 +319,5 @@ jobs:
           emulator-boot-timeout: 420
           disable-linux-hw-accel: auto
           disable-animations: true
-          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none -no-metrics -partition-size 1536
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back virtualscene -no-metrics -partition-size 1536
           script: bash scripts/prove-android-install.sh
