@@ -43,7 +43,8 @@ fi
 
 app_pid=""
 for _attempt in {1..20}; do
-  app_pid="$(adb shell pidof "$package_name" | tr -d '\r' | xargs)"
+  app_pid="$(adb shell pidof "$package_name" 2>/dev/null || true)"
+  app_pid="$(tr -d '\r' <<< "$app_pid" | xargs)"
   [[ -n "$app_pid" ]] && break
   sleep 0.5
 done
